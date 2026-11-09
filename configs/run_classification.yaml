@@ -16,14 +16,14 @@ train:
   d_model: 128
   nhead: 8
   num_layers: 6
+  min_bin: 300
+  max_bin: 800
+  num_bins: 50
   # training
   max_epochs: 50
   learning_rate: 1.0e-3
   lr_patience: 2
   early_stop_patience: 5
-  # shape-matching term: null (plain regression), emd, mmd, kl, mmd_joint or sliced_emd
-  shape_metric: emd
-  shape_weight: 0.1
   accelerator: gpu
   compile_model: true
 

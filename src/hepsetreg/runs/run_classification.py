@@ -145,10 +145,10 @@ def predict(config):
     """
 
     pred_logits = torch.cat([out["pred"] for out in outputs])
-    target_
-    pred_probs = torch.softmax(pred_logits,dim=1)
-    pred
+    targets = torch.cat([out["target"] for out in outputs])
 
+    pred_probs = torch.softmax(pred_logits,dim=1)
+    preds = torch.argmax(pred_probs,dim=1)
 
     mae = (preds - targets).abs().mean(dim=0)  # mean over events, per target feature
     for name, value in zip(target_features, mae):
