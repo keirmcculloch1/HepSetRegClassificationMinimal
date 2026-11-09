@@ -16,6 +16,7 @@ train:
   d_model: 128
   nhead: 8
   num_layers: 6
+  # binning
   min_bin: 300
   max_bin: 800
   num_bins: 50
@@ -28,6 +29,10 @@ train:
   compile_model: true
 
 predict:
+  # binning
+  min_bin: 300
+  max_bin: 800
+  num_bins: 50
   # fill in the actual run's version_N and checkpoint filename
   # (Lightning names it epoch=X-step=Y.ckpt by default)
   checkpoint: tb_logs/event_classification/version_39/checkpoints/epoch=49-step=57300.ckpt
