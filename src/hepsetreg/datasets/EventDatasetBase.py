@@ -76,7 +76,7 @@ def load_arrays(parquet_path, features):
     return global_arr, jet_arr, lepton_arr, target_arr
 
 
-class EventDataset(Dataset):
+class ClassificationEventDataset(Dataset):
     """
     Parameters
     ----------
@@ -118,10 +118,10 @@ class EventDataset(Dataset):
 
         # ---- global / target: already fixed-size, zscore the whole array at once ----
         self.global_tensor = torch.from_numpy(zscore(global_arr, g_mean, g_std))
-        self.target_tensor = torch.from_numpy(zscore(target_arr, t_mean, t_std))
+        self.target_tensor = (torch.from_numpy(target_arr)).to(torch.int64)
         if keep_unscaled_data:
             self.global_unscaled_tensor = torch.from_numpy(global_arr)
-            self.target_unscaled_tensor = torch.from_numpy(target_arr)
+            self.target_unscaled_tensor = (torch.from_numpy(target_arr)).to(torch.int64)
 
         # ---- leptons: always exactly 2/event -> flatten, zscore, reshape ----
         lep_flat = np.stack(
@@ -262,7 +262,7 @@ def _identity_collate(batch):
     return batch
 
 
-class EventDataModule(pl.LightningDataModule):
+class ClassificationEventDataModule(pl.LightningDataModule):
     """Separate train/val parquet files. Fits the Z-score stats (inputs AND
     targets) on the train file only, and reuses those exact stats for val
     (no leakage from val into the scaling). `max_jets` is likewise fit on
@@ -320,12 +320,12 @@ class EventDataModule(pl.LightningDataModule):
         self.max_jets = max_jets
 
     def setup(self, stage=None):
-        self.train_dataset = EventDataset(
+        self.train_dataset = ClassificationEventDataset(
             self.train_path, features=self.features,
             keep_unscaled_data=self.keep_unscaled_data, max_jets=self.max_jets,
         )  # fits stats (and, if not given, max_jets) on train
         self.stats = self.train_dataset.stats
-        self.val_dataset = EventDataset(
+        self.val_dataset = ClassificationEventDataset(
             self.val_path, features=self.features, stats=self.stats,
             keep_unscaled_data=self.keep_unscaled_data, max_jets=self.train_dataset.max_jets,
         )  # reuse them

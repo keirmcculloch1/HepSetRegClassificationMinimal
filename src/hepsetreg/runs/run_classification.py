@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 from hepsetreg.backbones.backbone import TransformerBackbone
 from hepsetreg.backbones.head import EventClassifier, ClassificationHead
 from hepsetreg.config import load_config
-from hepsetreg.datasets.EventDatasetBase import EventDataModule, EventDataset, _identity_collate
+from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate
 from hepsetreg.losses.shape_losses import SHAPE_LOSSES
 from hepsetreg.training.lightning_module import EventClassificationModule
 
@@ -64,7 +64,7 @@ def train(config):
     torch.set_float32_matmul_precision("medium")  # allows TF32 matmuls on Ampere+ GPUs
 
     dm = EventDataModule(
-        config["train_path"], config["val_path"], features=config["features"], batch_size=config["batch_size"], keep_unscaled_data=True,
+        config["train_path"], config["val_path"], features=config["features"], batch_size=config["batch_size"]
     )
 
     model = build_model(config)
@@ -75,7 +75,7 @@ def train(config):
         optimizer, factor=0.5, patience=config["lr_patience"],
     )
 
-    module = EventClassificationnModule(
+    module = EventClassificationModule(
         model, learning_rate=config["learning_rate"], scheduler_fn=scheduler_fn,
     )
 
@@ -114,7 +114,7 @@ def predict(config):
     stats, max_jets, model_config = saved["stats"], saved["max_jets"], saved["model_config"]
 
     model = build_model(model_config)
-    module = EventRegressionModule(model)
+    module = EventClassificationModule(model)
     # if the checkpoint was saved from a torch.compile(model)-wrapped run,
     # its keys are prefixed "_orig_mod." -- strip it so they match this
     # plain, uncompiled model's keys.
