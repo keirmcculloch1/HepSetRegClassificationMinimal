@@ -126,7 +126,7 @@ def predict(config):
     bin_edges = np.linspace(config["min_bin"],config["max_bin"],config["num_bins"]+1)
 
     target_features = model_config["features"]["target"]
-    ds = EventDataset(config["data_path"], features=model_config["features"], bin_edges = bin_edges,stats=stats, max_jets=max_jets)
+    ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], bin_edges = bin_edges,stats=stats, max_jets=max_jets)
     loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
 
     # Trainer.predict() puts the module in eval mode, disables gradients,
@@ -146,14 +146,18 @@ def predict(config):
     """
 
     pred_logits = torch.cat([out["pred"] for out in outputs])
-    targets = torch.cat([out["target"] for out in outputs])
+    targets = torch.cat([out["target"] for out in outputs])[:,0]
 
     pred_probs = torch.softmax(pred_logits,dim=1)
     preds = torch.argmax(pred_probs,dim=1)
 
-    mae = (preds - targets).abs().mean(dim=0)  # mean over events, per target feature
-    for name, value in zip(target_features, mae):
-        print(f"{name:12s} MAE: {value:.4f}")
+    mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
+    accuracy = (preds == targets).float().mean()
+
+    """for name, value in zip(target_features, mae):
+        print(f"{name:12s} MAE: {value:.4f}")"""
+
+    print(f"Accuracy: {accuracy:.4f}")
 
     # save predictions + targets to parquet, as two record groups -- e.g.
     # arr.targets.ttbar_mass, arr.predictions.ttbar_mass
