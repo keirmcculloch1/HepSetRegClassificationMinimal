@@ -21,7 +21,7 @@ class EventClassificationModule(pl.LightningModule):
     def __init__(self, model, learning_rate=1e-3, weight_decay=0.0, scheduler_fn=None):
         super().__init__()
         self.model = model
-        self.loss_fn = nn.CrossEntropyLoss
+        self.loss_fn = nn.CrossEntropyLoss()
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.scheduler_fn = scheduler_fn  # optimizer -> LR scheduler, or None for a constant LR
@@ -32,7 +32,7 @@ class EventClassificationModule(pl.LightningModule):
 
     def _shared_step(self, batch, stage):
         pred = self.model(batch)
-        loss = self.loss_fn(pred, batch["target"])
+        loss = self.loss_fn(pred, batch["target"][:,0])
         self.log(
             f"{stage}_loss", loss,
             on_step=(stage == "train"), on_epoch=True, prog_bar=True,
