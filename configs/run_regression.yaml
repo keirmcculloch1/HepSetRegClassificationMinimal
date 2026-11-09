@@ -16,6 +16,9 @@ train:
   d_model: 128
   nhead: 8
   num_layers: 6
+  min_bin: 300
+  max_bin: 800
+  num_bins: 50
   # training
   max_epochs: 50
   learning_rate: 1.0e-3

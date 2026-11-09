@@ -92,18 +92,21 @@ class ClassificationEventDataset(Dataset):
         real jet.
     """
 
-    def __init__(self, source, *, features, indices=None, stats=None, keep_unscaled_data=False, max_jets=None):
+    def __init__(self, source, *, features, bin_edges, indices=None, stats=None, keep_unscaled_data=False, max_jets=None):
         global_arr, jet_arr, lepton_arr, target_arr = (
             load_arrays(source, features) if isinstance(source, str) else source
         )
 
         if indices is None:
             indices = np.arange(len(global_arr))
+
+        indices = indices[ (values >= bin_edges[0]) & (values < bin_edges[-1]) ]
+
         indices = np.asarray(indices)
         n_events = len(indices)
 
         global_arr = global_arr[indices]
-        target_arr = target_arr[indices]
+        target_arr = (np.digitize(target_arr,bin_edges))[indices]
         jet_sub = jet_arr[indices]
         lepton_sub = lepton_arr[indices]
         self.keep_unscaled_data = keep_unscaled_data
@@ -301,7 +304,7 @@ class ClassificationEventDataModule(pl.LightningDataModule):
     """
 
     def __init__(
-        self, train_path, val_path, *, features, batch_size=256, num_workers=0,
+        self, train_path, val_path, *, features, bin_edges, batch_size=256, num_workers=0,
         persistent_workers=False, keep_unscaled_data=False, max_jets=None,
         device=None,
     ):
@@ -309,6 +312,7 @@ class ClassificationEventDataModule(pl.LightningDataModule):
         self.train_path = train_path
         self.val_path = val_path
         self.features = features
+        self.bin_edges = bin_edges
         self.batch_size = batch_size
         self.device = torch.device(device) if device is not None else None
         if self.device is not None and self.device.type == "cuda":
@@ -321,12 +325,12 @@ class ClassificationEventDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         self.train_dataset = ClassificationEventDataset(
-            self.train_path, features=self.features,
+            self.train_path, features=self.features, bin_edges = self.bin_edges,
             keep_unscaled_data=self.keep_unscaled_data, max_jets=self.max_jets,
         )  # fits stats (and, if not given, max_jets) on train
         self.stats = self.train_dataset.stats
         self.val_dataset = ClassificationEventDataset(
-            self.val_path, features=self.features, stats=self.stats,
+            self.val_path, features=self.features, stats=self.stats, bin_edges = self.bin_edges,
             keep_unscaled_data=self.keep_unscaled_data, max_jets=self.train_dataset.max_jets,
         )  # reuse them
         if self.device is not None:

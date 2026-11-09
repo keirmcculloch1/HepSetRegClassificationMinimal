@@ -59,7 +59,7 @@ class ClassificationHead(nn.Module):
             layers += [nn.Linear(prev_dim, hidden_dim), nn.GELU(), nn.Dropout(dropout)]
             prev_dim = hidden_dim
         layers.append(nn.Linear(prev_dim, output_dim))
-        layers.append(nn.Sigmoid())
+        #layers.append(nn.Sigmoid())
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -89,10 +89,12 @@ class EventClassifier(nn.Module):
     `EventDataset5.collate_fn` and returns (B, output_dim) predictions.
     """
 
-    def __init__(self, backbone, head):
+    def __init__(self, backbone, head, bins):
         super().__init__()
         self.backbone = backbone
         self.head = head
+
+        self.bins = bins
 
     def forward(self, batch):
         pooled = self.backbone(batch)

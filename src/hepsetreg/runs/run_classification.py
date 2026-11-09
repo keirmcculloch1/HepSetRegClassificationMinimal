@@ -30,7 +30,6 @@ from hepsetreg.backbones.backbone import TransformerBackbone
 from hepsetreg.backbones.head import EventClassifier, ClassificationHead
 from hepsetreg.config import load_config
 from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate
-from hepsetreg.losses.shape_losses import SHAPE_LOSSES
 from hepsetreg.training.lightning_module import EventClassificationModule
 
 MODEL_KEYS = ["d_model", "nhead", "num_layers","num_bins"]
@@ -63,8 +62,10 @@ def train(config):
     torch.set_num_threads(4)
     torch.set_float32_matmul_precision("medium")  # allows TF32 matmuls on Ampere+ GPUs
 
-    dm = EventDataModule(
-        config["train_path"], config["val_path"], features=config["features"], batch_size=config["batch_size"]
+    bin_edges = np.linspace(config["min_bin"],config["max_bin"],config["num_bins"]+1)
+
+    dm = ClassificationEventDataModule(
+        config["train_path"], config["val_path"], features=config["features"], bin_edges = bin_edges, batch_size=config["batch_size"]
     )
 
     model = build_model(config)
@@ -121,8 +122,10 @@ def predict(config):
     state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
     module.load_state_dict(state_dict)
 
+    bin_edges = np.linspace(config["min_bin"],config["max_bin"],config["num_bins"]+1)
+
     target_features = model_config["features"]["target"]
-    ds = EventDataset(config["data_path"], features=model_config["features"], stats=stats, max_jets=max_jets)
+    ds = EventDataset(config["data_path"], features=model_config["features"], bin_edges = bin_edges,stats=stats, max_jets=max_jets)
     loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
 
     # Trainer.predict() puts the module in eval mode, disables gradients,
@@ -130,6 +133,8 @@ def predict(config):
     # .eval()/.to(device)/no_grad()/per-batch transfer loop needed.
     trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
     outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
+
+    """
     preds_scaled = torch.cat([out["pred"] for out in outputs])
     targets_scaled = torch.cat([out["target"] for out in outputs])
 
@@ -137,16 +142,17 @@ def predict(config):
     t_mean, t_std = torch.as_tensor(t_mean), torch.as_tensor(t_std)
     preds = preds_scaled * (t_std + 1e-8) + t_mean
     targets = targets_scaled * (t_std + 1e-8) + t_mean
+    """
+
+    pred_logits = torch.cat([out["pred"] for out in outputs])
+    target_
+    pred_probs = torch.softmax(pred_logits,dim=1)
+    pred
+
 
     mae = (preds - targets).abs().mean(dim=0)  # mean over events, per target feature
     for name, value in zip(target_features, mae):
         print(f"{name:12s} MAE: {value:.4f}")
-
-    if config["shape_metric"] is not None:
-        shape_loss_fn = SHAPE_LOSSES[config["shape_metric"]]
-        for i, name in enumerate(target_features):
-            shape = shape_loss_fn(preds_scaled[:, i:i + 1], targets_scaled[:, i:i + 1])
-            print(f"{name:12s} {config['shape_metric']} shape distance (z-scored): {shape:.4f}")
 
     # save predictions + targets to parquet, as two record groups -- e.g.
     # arr.targets.ttbar_mass, arr.predictions.ttbar_mass

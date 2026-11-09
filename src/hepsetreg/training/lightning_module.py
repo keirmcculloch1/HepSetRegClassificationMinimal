@@ -32,7 +32,9 @@ class EventClassificationModule(pl.LightningModule):
 
     def _shared_step(self, batch, stage):
         pred = self.model(batch)
-        loss = self.loss_fn(pred, batch["target"][:,0])
+        unbinned_target = batch["target"][:,0]
+        
+        loss = self.loss_fn(pred, )
         self.log(
             f"{stage}_loss", loss,
             on_step=(stage == "train"), on_epoch=True, prog_bar=True,
