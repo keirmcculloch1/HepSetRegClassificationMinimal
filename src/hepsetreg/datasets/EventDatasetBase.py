@@ -106,7 +106,7 @@ class ClassificationEventDataset(Dataset):
         n_events = len(indices)
 
         global_arr = global_arr[indices]
-        target_arr = (np.digitize(target_arr[indices],bin_edges))
+        target_arr = np.digitize(target_arr[indices],bin_edges)-1
         jet_sub = jet_arr[indices]
         lepton_sub = lepton_arr[indices]
         self.keep_unscaled_data = keep_unscaled_data
