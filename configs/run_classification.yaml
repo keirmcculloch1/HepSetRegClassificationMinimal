@@ -1,0 +1,39 @@
+# Config for: python -m hepsetreg.runs.run_classification --train|--predict --config configs/run_classification.yaml
+
+# field names as they appear in the parquet file -- shared by train and predict
+features:
+  global: [global_njet, global_nelectron, global_nmuon, global_nbtagged, global_met_met, global_met_phi]
+  jet: [jet_pt, jet_eta, jet_phi, jet_e, jet_m, jet_px, jet_py, jet_pz, jet_bTag]
+  lepton: [pt, eta, phi, e, m, px, py, pz, charge, is_electron]
+  target: [ttbar_mass]
+
+train:
+  # data -- setup_bsc downloads these, so training runs out of the box.
+  train_path: datasets/ttbar-2L_train_051026.parquet
+  val_path: datasets/ttbar-2L_val_051026.parquet
+  batch_size: 4096
+  # model architecture
+  d_model: 128
+  nhead: 8
+  num_layers: 6
+  # training
+  max_epochs: 50
+  learning_rate: 1.0e-3
+  lr_patience: 2
+  early_stop_patience: 5
+  # shape-matching term: null (plain regression), emd, mmd, kl, mmd_joint or sliced_emd
+  shape_metric: emd
+  shape_weight: 0.1
+  accelerator: gpu
+  compile_model: true
+
+predict:
+  # fill in the actual run's version_N and checkpoint filename
+  # (Lightning names it epoch=X-step=Y.ckpt by default)
+  checkpoint: tb_logs/event_classification/version_39/checkpoints/epoch=49-step=57300.ckpt
+  stats: tb_logs/event_classification/version_39/stats.pt
+  data_path: datasets/ttbar-2L_test_051026.parquet
+  batch_size: 4096
+  accelerator: gpu
+  output: ttbar-2L-inference_191026.parquet
+  shape_metric: null  # which distance to report on the test set (null to skip)

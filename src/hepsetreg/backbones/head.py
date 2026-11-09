@@ -36,9 +36,54 @@ class RegressionHead(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class ClassificationHead(nn.Module):
+    """Simple MLP mapping a pooled embedding to the classification targets.
+
+    Hidden width halves each layer (floored at `min_neurons`).
+    """
+
+    def __init__(
+        self,
+        d_model,
+        output_dim,
+        n_layers=3,
+        start_neurons=128,
+        dropout=0.05,
+        min_neurons=8,
+    ):
+        super().__init__()
+        layers = []
+        prev_dim = d_model
+        for i in range(n_layers):
+            hidden_dim = max(start_neurons // (2**i), min_neurons)
+            layers += [nn.Linear(prev_dim, hidden_dim), nn.GELU(), nn.Dropout(dropout)]
+            prev_dim = hidden_dim
+        layers.append(nn.Linear(prev_dim, output_dim))
+        layers.append(nn.Sigmoid())
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
 
 class EventRegressor(nn.Module):
     """Wires a TransformerBackbone + RegressionHead together.
+
+    `forward(batch)` takes the exact dict produced by
+    `EventDataset5.collate_fn` and returns (B, output_dim) predictions.
+    """
+
+    def __init__(self, backbone, head):
+        super().__init__()
+        self.backbone = backbone
+        self.head = head
+
+    def forward(self, batch):
+        pooled = self.backbone(batch)
+        return self.head(pooled)
+
+class EventClassifier(nn.Module):
+    """Wires a TransformerBackbone + ClassificationHead together.
 
     `forward(batch)` takes the exact dict produced by
     `EventDataset5.collate_fn` and returns (B, output_dim) predictions.
