@@ -100,13 +100,13 @@ class ClassificationEventDataset(Dataset):
         if indices is None:
             indices = np.arange(len(global_arr))
 
-        indices = indices[ (values >= bin_edges[0]) & (values < bin_edges[-1]) ]
+        indices = indices[ (target_arr >= bin_edges[0]) & (target_arr < bin_edges[-1]) ]
 
         indices = np.asarray(indices)
         n_events = len(indices)
 
         global_arr = global_arr[indices]
-        target_arr = (np.digitize(target_arr,bin_edges))[indices]
+        target_arr = (np.digitize(target_arr[indices],bin_edges))
         jet_sub = jet_arr[indices]
         lepton_sub = lepton_arr[indices]
         self.keep_unscaled_data = keep_unscaled_data
