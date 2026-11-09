@@ -100,7 +100,7 @@ class ClassificationEventDataset(Dataset):
         if indices is None:
             indices = np.arange(len(global_arr))
 
-        indices = indices[ (target_arr >= bin_edges[0]) & (target_arr < bin_edges[-1]) ]
+        indices = indices[ (target_arr[:,0] >= bin_edges[0]) & (target_arr[:,0] < bin_edges[-1]) ]
 
         indices = np.asarray(indices)
         n_events = len(indices)
