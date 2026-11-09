@@ -7,24 +7,33 @@ name = "hepsetreg"
 version = "0.1.0"
 description = "PyTorch Lightning transformer-encoder package for regressing observables from variable-length sets of reconstructed physics objects (e.g. ATLAS jets/leptons/MET)."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "~=3.12.0"
 license = { text = "MIT" }
 authors = [{ name = "Ethan Simpson" }]
 dependencies = [
-    "torch>=2.4.0",
-    "lightning>=2.4.0",
+    "torch==2.4.0",
+    "lightning==2.4.0",
     "numpy>=1.26",
+    "h5py>=3.10",
     "pyyaml>=6.0",
+    "omegaconf>=2.3",
     "scipy>=1.18.1",
     "tensorboard>=2.21.0",
     "awkward>=1.2.0",
     "pyarrow>=12.0.1",
     "pytorch-lightning>=2.4.0",
+    "aim>=3.29.1",
+    "setuptools>=84.0.0",
+    "uproot>=5.7.6",
+    "vector>=1.8.1",
     "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "ipykernel>=6.29", "jupyter-client>=8.0"]
+
+[project.scripts]
+hepsetreg-train = "hepsetreg.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

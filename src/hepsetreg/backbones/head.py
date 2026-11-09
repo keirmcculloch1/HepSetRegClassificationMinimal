@@ -89,12 +89,10 @@ class EventClassifier(nn.Module):
     `EventDataset5.collate_fn` and returns (B, output_dim) predictions.
     """
 
-    def __init__(self, backbone, head, bins):
+    def __init__(self, backbone, head):
         super().__init__()
         self.backbone = backbone
         self.head = head
-
-        self.bins = bins
 
     def forward(self, batch):
         pooled = self.backbone(batch)

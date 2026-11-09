@@ -20,6 +20,7 @@ if __name__ == "__main__":
 
 import logging
 
+import numpy as np
 import awkward as ak
 import pytorch_lightning as pl
 import torch
@@ -32,7 +33,7 @@ from hepsetreg.config import load_config
 from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate
 from hepsetreg.training.lightning_module import EventClassificationModule
 
-MODEL_KEYS = ["d_model", "nhead", "num_layers","num_bins"]
+MODEL_KEYS = ["d_model", "nhead", "num_layers", "num_bins"]
 
 
 def build_model(config):
