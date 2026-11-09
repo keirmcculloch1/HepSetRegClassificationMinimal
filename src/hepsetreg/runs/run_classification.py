@@ -33,7 +33,7 @@ from hepsetreg.datasets.EventDatasetBase import EventDataModule, EventDataset, _
 from hepsetreg.losses.shape_losses import SHAPE_LOSSES
 from hepsetreg.training.lightning_module import EventClassificationModule
 
-MODEL_KEYS = ["d_model", "nhead", "num_layers","min_bin","max_bin","num_bins"]
+MODEL_KEYS = ["d_model", "nhead", "num_layers","num_bins"]
 
 
 def build_model(config):
@@ -64,7 +64,7 @@ def train(config):
     torch.set_float32_matmul_precision("medium")  # allows TF32 matmuls on Ampere+ GPUs
 
     dm = EventDataModule(
-        config["train_path"], config["val_path"], features=config["features"], batch_size=config["batch_size"],
+        config["train_path"], config["val_path"], features=config["features"], batch_size=config["batch_size"], keep_unscaled_data=True,
     )
 
     model = build_model(config)
