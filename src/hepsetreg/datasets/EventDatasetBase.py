@@ -100,13 +100,17 @@ class ClassificationEventDataset(Dataset):
         if indices is None:
             indices = np.arange(len(global_arr))
 
+        #Filter out indices with values outside the binning range
         indices = indices[ (target_arr[:,0] >= bin_edges[0]) & (target_arr[:,0] < bin_edges[-1]) ]
 
         indices = np.asarray(indices)
         n_events = len(indices)
 
         global_arr = global_arr[indices]
+
+        #Bin the target array according to the bin edges
         target_arr = np.digitize(target_arr[indices],bin_edges)-1
+
         jet_sub = jet_arr[indices]
         lepton_sub = lepton_arr[indices]
         self.keep_unscaled_data = keep_unscaled_data
@@ -121,9 +125,16 @@ class ClassificationEventDataset(Dataset):
 
         # ---- global / target: already fixed-size, zscore the whole array at once ----
         self.global_tensor = torch.from_numpy(zscore(global_arr, g_mean, g_std))
+
+        #Do not scaled the targets as they are bin values, not a continuous value
+        #Explicitly convert to an integer type
         self.target_tensor = (torch.from_numpy(target_arr)).to(torch.int64)
+
         if keep_unscaled_data:
             self.global_unscaled_tensor = torch.from_numpy(global_arr)
+
+            #Do not scaled the targets as they are bin values, not a continuous value
+            #Explicitly convert to an integer type
             self.target_unscaled_tensor = (torch.from_numpy(target_arr)).to(torch.int64)
 
         # ---- leptons: always exactly 2/event -> flatten, zscore, reshape ----

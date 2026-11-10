@@ -33,8 +33,7 @@ from hepsetreg.config import load_config
 from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate
 from hepsetreg.training.lightning_module import EventClassificationModule
 
-MODEL_KEYS = ["d_model", "nhead", "num_layers", "num_bins"]
-
+MODEL_KEYS = ["d_model", "nhead", "num_layers"]
 
 def build_model(config):
     """Builds the model architecture from a config dict (see MODEL_KEYS and
@@ -63,6 +62,7 @@ def train(config):
     torch.set_num_threads(4)
     torch.set_float32_matmul_precision("medium")  # allows TF32 matmuls on Ampere+ GPUs
 
+    #Calculate bin edges as equally spaced in mass range
     bin_edges = np.linspace(config["min_bin"],config["max_bin"],config["num_bins"]+1)
 
     dm = ClassificationEventDataModule(
@@ -123,6 +123,7 @@ def predict(config):
     state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
     module.load_state_dict(state_dict)
 
+    #Calculate bin edges as equally spaced in mass range
     bin_edges = np.linspace(config["min_bin"],config["max_bin"],config["num_bins"]+1)
 
     target_features = model_config["features"]["target"]
@@ -135,28 +136,27 @@ def predict(config):
     trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
     outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
 
-    """
-    preds_scaled = torch.cat([out["pred"] for out in outputs])
-    targets_scaled = torch.cat([out["target"] for out in outputs])
-
-    t_mean, t_std = stats["target"]
-    t_mean, t_std = torch.as_tensor(t_mean), torch.as_tensor(t_std)
-    preds = preds_scaled * (t_std + 1e-8) + t_mean
-    targets = targets_scaled * (t_std + 1e-8) + t_mean
-    """
-
+    #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
     pred_logits = torch.cat([out["pred"] for out in outputs])
+
+    #Targets is Nx1, slice it to prevent shape issues
     targets = torch.cat([out["target"] for out in outputs])[:,0]
 
+    #Apply softmax to get proababilities
     pred_probs = torch.softmax(pred_logits,dim=1)
+    #Bin prediction is highest probability index
     preds = torch.argmax(pred_probs,dim=1)
 
+    #MAE is not a relevant/useful metric for classification
     mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
+
+    #Accuracy is the proportion of events guess correctly
     accuracy = (preds == targets).float().mean()
 
     """for name, value in zip(target_features, mae):
         print(f"{name:12s} MAE: {value:.4f}")"""
 
+    #Output the accuracy
     print(f"Accuracy: {accuracy:.4f}")
 
     # save predictions + targets to parquet, as two record groups -- e.g.
@@ -165,6 +165,9 @@ def predict(config):
     # non-contiguous view, which pyarrow rejects with "ndarray is not contiguous"
     """target_fields = {name: ak.Array(targets[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
     pred_fields = {name: ak.Array(preds[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}"""
+
+    ## ^^ Removed as this only works when the predictions have shape Nxm, where m is the number of target features
+    ## VV Instead just assume one target features and a shape of N
 
     target_fields = {"ttbar_mass": ak.Array(targets.numpy())}
     pred_fields = {"ttbar_mass": ak.Array(preds.numpy())}

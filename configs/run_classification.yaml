@@ -10,7 +10,7 @@ features:
 # binning
 min_bin: 320
 max_bin: 640
-num_bins: 64
+num_bins: 32
 
 train:
   # data -- setup_bsc downloads these, so training runs out of the box.
