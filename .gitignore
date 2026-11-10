@@ -3,6 +3,3 @@
 __pycache__/
 .uv-env
 *.parquet
-!ttbar-2L_test_051026.parquet
-!ttbar-2L_train_051026.parquet
-!ttbar-2L_val_051026.parquet
