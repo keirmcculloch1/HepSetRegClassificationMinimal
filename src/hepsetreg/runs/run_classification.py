@@ -50,7 +50,7 @@ def build_model(config):
         num_layers=config["num_layers"],
     )
     #Create a list of the number of classes for each feature
-    #Eg. if you target ttbar_mass and p_t with 100 classes for each it would be (100,100)
+    #Eg. if you target ttbar_mass and ttbar_pt with 100 classes for each it would be (100,100)
     classes_per_feature = [config["binning"][target_feature][num_bins] for target_feature in features["target"]]
 
     head = ClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=classes_per_feature)
@@ -137,11 +137,11 @@ def predict(config):
     state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
     module.load_state_dict(state_dict)
 
-    #Calculate bin edges as equally spaced in mass range
-    bin_edges = np.linspace(config["min_bin"],config["max_bin"],config["num_bins"]+1)
+    #Calculate bin edges for each target feature
+    feature_bin_edges = [calculate_bin_edges(target_feature) for target_feature in features["target"]]
 
     target_features = model_config["features"]["target"]
-    ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], bin_edges = bin_edges,stats=stats, max_jets=max_jets)
+    ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges,stats=stats, max_jets=max_jets)
     loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
 
     # Trainer.predict() puts the module in eval mode, disables gradients,
@@ -154,7 +154,7 @@ def predict(config):
     pred_logits = torch.cat([out["pred"] for out in outputs])
 
     #Targets is Nx1, slice it to prevent shape issues
-    targets = torch.cat([out["target"] for out in outputs])[:,0]
+    targets = torch.cat([out["target"] for out in outputs])
 
     #Apply softmax to get proababilities
     pred_probs = torch.softmax(pred_logits,dim=1)
@@ -167,8 +167,8 @@ def predict(config):
     #Accuracy is the proportion of events guess correctly
     accuracy = (preds == targets).float().mean()
 
-    """for name, value in zip(target_features, mae):
-        print(f"{name:12s} MAE: {value:.4f}")"""
+    for name, value in zip(target_features, mae):
+        print(f"{name:12s} MAE: {value:.4f}")
 
     #Output the accuracy
     print(f"Accuracy: {accuracy:.4f}")
@@ -177,14 +177,14 @@ def predict(config):
     # arr.targets.ttbar_mass, arr.predictions.ttbar_mass
     # .contiguous(): a column slice of a 2D tensor is a strided,
     # non-contiguous view, which pyarrow rejects with "ndarray is not contiguous"
-    """target_fields = {name: ak.Array(targets[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
-    pred_fields = {name: ak.Array(preds[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}"""
+    target_fields = {name: ak.Array(targets[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
+    pred_fields = {name: ak.Array(preds[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
 
-    ## ^^ Removed as this only works when the predictions have shape Nxm, where m is the number of target features
-    ## VV Instead just assume one target features and a shape of N
+    ## ^^ This only works when the predictions have shape Nxm, where m is the number of target features
+    ## VV This just assumes one target features and a shape of N
 
-    target_fields = {"ttbar_mass": ak.Array(targets.numpy())}
-    pred_fields = {"ttbar_mass": ak.Array(preds.numpy())}
+    """target_fields = {"ttbar_mass": ak.Array(targets.numpy())}
+    pred_fields = {"ttbar_mass": ak.Array(preds.numpy())}"""
 
     out = ak.zip({"targets": ak.zip(target_fields), "predictions": ak.zip(pred_fields)}, depth_limit=1)
     ak.to_parquet(out, config["output"])
