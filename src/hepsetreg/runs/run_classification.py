@@ -49,9 +49,23 @@ def build_model(config):
         nhead=config["nhead"],
         num_layers=config["num_layers"],
     )
-    head = ClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=config["num_bins"], )
+    #Create a list of the number of classes for each feature
+    #Eg. if you target ttbar_mass and p_t with 100 classes for each it would be (100,100)
+    classes_per_feature = [config["binning"][target_feature][num_bins] for target_feature in features["target"]]
+
+    head = ClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=classes_per_feature)
     return EventClassifier(backbone, head)
 
+#Calculates the bin edges for a given target feature
+def calculate_bin_edges(feature_name):
+
+    #Load binning parameters
+    leftmost_bin_edge = config["binning"][feature_name]["left_edge"]
+    rightmost_bin_edge = config["binning"][feature_name]["right_edge"]
+    number_of_bins = config["binning"][target_feature]["num_bins"]
+
+    #Equally spaced bins
+    return np.linspace(leftmost_bin_edge,rightmost_bin_edge,number_of_bins+1)
 
 def train(config):
     # Not a hyperparameter -- an environment setting. PyTorch defaults to
@@ -62,8 +76,8 @@ def train(config):
     torch.set_num_threads(4)
     torch.set_float32_matmul_precision("medium")  # allows TF32 matmuls on Ampere+ GPUs
 
-    #Calculate bin edges as equally spaced in mass range
-    bin_edges = np.linspace(config["min_bin"],config["max_bin"],config["num_bins"]+1)
+    #Calculate bin edges for each target feature
+    bin_edges = [calculate_bin_edges(target_feature) for target_feature in features["target"]]
 
     dm = ClassificationEventDataModule(
         config["train_path"], config["val_path"], features=config["features"], bin_edges = bin_edges, batch_size=config["batch_size"]

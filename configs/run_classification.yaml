@@ -8,9 +8,11 @@ features:
   target: [ttbar_mass]
 
 # binning
-min_bin: 320
-max_bin: 640
-num_bins: 32
+binning:
+  ttbar_mass:
+    left_edge: 320
+    right_edge: 640
+    num_bins: 32
 
 train:
   # data -- setup_bsc downloads these, so training runs out of the box.
