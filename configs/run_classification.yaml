@@ -7,6 +7,11 @@ features:
   lepton: [pt, eta, phi, e, m, px, py, pz, charge, is_electron]
   target: [ttbar_mass]
 
+# binning
+min_bin: 320
+max_bin: 640
+num_bins: 64
+
 train:
   # data -- setup_bsc downloads these, so training runs out of the box.
   train_path: datasets/ttbar-2L_train_051026.parquet
@@ -16,10 +21,6 @@ train:
   d_model: 128
   nhead: 8
   num_layers: 6
-  # binning
-  min_bin: 300
-  max_bin: 800
-  num_bins: 50
   # training
   max_epochs: 50
   learning_rate: 1.0e-3
@@ -29,10 +30,6 @@ train:
   compile_model: true
 
 predict:
-  # binning
-  min_bin: 300
-  max_bin: 800
-  num_bins: 50
   # fill in the actual run's version_N and checkpoint filename
   # (Lightning names it epoch=X-step=Y.ckpt by default)
   checkpoint: tb_logs/event_classification/version_39/checkpoints/epoch=49-step=57300.ckpt

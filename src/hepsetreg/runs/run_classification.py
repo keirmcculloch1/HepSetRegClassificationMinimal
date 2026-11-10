@@ -163,8 +163,12 @@ def predict(config):
     # arr.targets.ttbar_mass, arr.predictions.ttbar_mass
     # .contiguous(): a column slice of a 2D tensor is a strided,
     # non-contiguous view, which pyarrow rejects with "ndarray is not contiguous"
-    target_fields = {name: ak.Array(targets[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
-    pred_fields = {name: ak.Array(preds[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
+    """target_fields = {name: ak.Array(targets[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
+    pred_fields = {name: ak.Array(preds[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}"""
+
+    target_fields = {"ttbar_mass": ak.Array(targets.numpy())}
+    pred_fields = {"ttbar_mass": ak.Array(preds.numpy())}
+
     out = ak.zip({"targets": ak.zip(target_fields), "predictions": ak.zip(pred_fields)}, depth_limit=1)
     ak.to_parquet(out, config["output"])
     print(f"saved predictions to {config['output']}")

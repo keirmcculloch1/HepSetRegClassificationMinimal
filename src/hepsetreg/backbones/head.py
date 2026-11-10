@@ -59,7 +59,6 @@ class ClassificationHead(nn.Module):
             layers += [nn.Linear(prev_dim, hidden_dim), nn.GELU(), nn.Dropout(dropout)]
             prev_dim = hidden_dim
         layers.append(nn.Linear(prev_dim, output_dim))
-        #layers.append(nn.Sigmoid())
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
