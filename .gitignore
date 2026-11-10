@@ -3,3 +3,4 @@
 __pycache__/
 .uv-env
 *.parquet
+/tb_logs/
