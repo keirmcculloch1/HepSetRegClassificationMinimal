@@ -77,6 +77,7 @@ def train(config):
     torch.set_float32_matmul_precision("medium")  # allows TF32 matmuls on Ampere+ GPUs
 
     #Calculate bin edges for each target feature
+    features = config["features"]
     feature_bin_edges = [calculate_bin_edges(target_feature) for target_feature in features["target"]]
 
     dm = ClassificationEventDataModule(
@@ -138,6 +139,7 @@ def predict(config):
     module.load_state_dict(state_dict)
 
     #Calculate bin edges for each target feature
+    features = config["features"]
     feature_bin_edges = [calculate_bin_edges(target_feature) for target_feature in features["target"]]
 
     target_features = model_config["features"]["target"]
