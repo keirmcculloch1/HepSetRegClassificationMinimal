@@ -45,7 +45,8 @@ class ClassificationHead(nn.Module):
     def __init__(
         self,
         d_model,
-        output_dim,
+        num_features,
+        classes_per_feature,
         n_layers=3,
         start_neurons=128,
         dropout=0.05,
@@ -54,6 +55,10 @@ class ClassificationHead(nn.Module):
         super().__init__()
         layers = []
         prev_dim = d_model
+
+        #For N features each with (i,j,k...) classes the output dimension is i+j+k...
+        output_dim = np.sum(classes_per_feature)
+
         for i in range(n_layers):
             hidden_dim = max(start_neurons // (2**i), min_neurons)
             layers += [nn.Linear(prev_dim, hidden_dim), nn.GELU(), nn.Dropout(dropout)]
@@ -62,7 +67,9 @@ class ClassificationHead(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.net(x)
+        #Reshape output into an awkward array with length equal to the number of features
+        #Each sub-array is a number of logits corresponding to the number of classes for that feature
+        return np.unflatten(self.net(x),classes_per_feature)
 
 
 class EventRegressor(nn.Module):

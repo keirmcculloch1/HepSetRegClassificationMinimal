@@ -49,7 +49,7 @@ def build_model(config):
         nhead=config["nhead"],
         num_layers=config["num_layers"],
     )
-    head = ClassificationHead(d_model=config["d_model"], output_dim=config["num_bins"])
+    head = ClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=config["num_bins"], )
     return EventClassifier(backbone, head)
 
 
