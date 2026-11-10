@@ -57,7 +57,7 @@ def build_model(config):
     return EventClassifier(backbone, head)
 
 #Calculates the bin edges for a given target feature
-def calculate_bin_edges(feature_name):
+def calculate_bin_edges(config,feature_name):
 
     #Load binning parameters
     leftmost_bin_edge = config["binning"][feature_name]["left_edge"]
@@ -78,7 +78,7 @@ def train(config):
 
     #Calculate bin edges for each target feature
     features = config["features"]
-    feature_bin_edges = [calculate_bin_edges(target_feature) for target_feature in features["target"]]
+    feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
 
     dm = ClassificationEventDataModule(
         config["train_path"], config["val_path"], features=config["features"], feature_bin_edges = feature_bin_edges, batch_size=config["batch_size"]
@@ -140,7 +140,7 @@ def predict(config):
 
     #Calculate bin edges for each target feature
     features = config["features"]
-    feature_bin_edges = [calculate_bin_edges(target_feature) for target_feature in features["target"]]
+    feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
 
     target_features = model_config["features"]["target"]
     ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges,stats=stats, max_jets=max_jets)
