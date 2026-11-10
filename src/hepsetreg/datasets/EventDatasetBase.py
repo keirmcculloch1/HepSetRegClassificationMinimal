@@ -281,12 +281,14 @@ class ClassificationEventDataset(Dataset):
         for i,bin_edges in enumerate(feature_bin_edges):
 
             #Filter out indices with values outside the binning range
-            indices = indices[ (target_arr[:,0] >= bin_edges[0]) & (target_arr[:,0] < bin_edges[-1]) ]
+            mask = ( (target_arr[indices,i] >= bin_edges[0]) & (target_arr[indices,i] < bin_edges[-1]) )
+            indices = indices[mask]
 
-            #Apply filter to target array before binning
-            target_arr = target_arr[indices]
+        #Apply filter to target array before binning
+        target_arr = target_arr[indices]
 
-            #Bin the target array according to the bin edges
+        #Bin the target array according to the bin edges
+        for i,bin_edges in enumerate(feature_bin_edges):
             target_arr[:,i] = np.digitize(target_arr[:,i],bin_edges)-1
 
         indices = np.asarray(indices)

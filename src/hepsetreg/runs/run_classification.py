@@ -51,7 +51,7 @@ def build_model(config):
     )
     #Create a list of the number of classes for each feature
     #Eg. if you target ttbar_mass and ttbar_pt with 100 classes for each it would be (100,100)
-    classes_per_feature = [config["binning"][target_feature][num_bins] for target_feature in features["target"]]
+    classes_per_feature = [config["binning"][target_feature]["num_bins"] for target_feature in features["target"]]
 
     head = ClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=classes_per_feature)
     return EventClassifier(backbone, head)

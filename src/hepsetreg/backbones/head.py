@@ -9,6 +9,8 @@ import torch.nn as nn
 
 import awkward as ak
 
+import numpy as np
+
 class RegressionHead(nn.Module):
     """Simple MLP mapping a pooled embedding to the regression targets.
 
