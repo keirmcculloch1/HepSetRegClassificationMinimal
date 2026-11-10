@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import torch.nn as nn
 
+import awkward as ak
 
 class RegressionHead(nn.Module):
     """Simple MLP mapping a pooled embedding to the regression targets.
@@ -69,7 +70,7 @@ class ClassificationHead(nn.Module):
     def forward(self, x):
         #Reshape output into an awkward array with length equal to the number of features
         #Each sub-array is a number of logits corresponding to the number of classes for that feature
-        return np.unflatten(self.net(x),classes_per_feature)
+        return ak.unflatten(self.net(x),classes_per_feature)
 
 
 class EventRegressor(nn.Module):
