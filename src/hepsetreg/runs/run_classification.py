@@ -62,7 +62,7 @@ def calculate_bin_edges(config,feature_name):
     #Load binning parameters
     leftmost_bin_edge = config["binning"][feature_name]["left_edge"]
     rightmost_bin_edge = config["binning"][feature_name]["right_edge"]
-    number_of_bins = config["binning"][target_feature]["num_bins"]
+    number_of_bins = config["binning"][feature_name]["num_bins"]
 
     #Equally spaced bins
     return np.linspace(leftmost_bin_edge,rightmost_bin_edge,number_of_bins+1)
