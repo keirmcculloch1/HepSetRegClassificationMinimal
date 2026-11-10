@@ -33,7 +33,8 @@ from hepsetreg.config import load_config
 from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate
 from hepsetreg.training.lightning_module import EventClassificationModule
 
-MODEL_KEYS = ["d_model", "nhead", "num_layers"]
+#Include binning parameters in model keys for predictions
+MODEL_KEYS = ["d_model", "nhead", "num_layers", "binning"]
 
 def build_model(config):
     """Builds the model architecture from a config dict (see MODEL_KEYS and

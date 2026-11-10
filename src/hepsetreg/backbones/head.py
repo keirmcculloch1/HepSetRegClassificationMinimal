@@ -5,9 +5,9 @@ to the target vector (see TARGET_FEATURES in EventDataset5.py).
 
 from __future__ import annotations
 
-import torch.nn as nn
+import torch
 
-import awkward as ak
+import torch.nn as nn
 
 import numpy as np
 
@@ -59,6 +59,9 @@ class ClassificationHead(nn.Module):
         layers = []
         prev_dim = d_model
 
+        #Save classes_per_feature to use in forward()
+        self.classes_per_feature = classes_per_feature
+
         #For N features each with (i,j,k...) classes the output dimension is i+j+k...
         output_dim = np.sum(classes_per_feature)
 
@@ -72,7 +75,7 @@ class ClassificationHead(nn.Module):
     def forward(self, x):
         #Reshape output into an awkward array with length equal to the number of features
         #Each sub-array is a number of logits corresponding to the number of classes for that feature
-        return ak.unflatten(self.net(x),classes_per_feature)
+        return torch.split(self.net(x),self.classes_per_feature,dim=-1)
 
 
 class EventRegressor(nn.Module):

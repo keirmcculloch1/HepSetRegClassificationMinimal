@@ -82,11 +82,17 @@ class EventClassificationModule(pl.LightningModule):
         return self.model(batch)
 
     def _shared_step(self, batch, stage):
-        pred = self.model(batch)
+        preds = self.model(batch)
 
-        #Slice the targets to avoid shape issues
-        #This assumes that there is only one target feature
-        loss = self.loss_fn(pred, batch["target"][:,0])
+        total_loss = 0
+
+        for i, pred in enumerate(preds):
+            total_loss += self.loss_fn(pred, batch["target"][:, i])
+
+        #Average losses
+        #loss /= len(preds)
+
+        loss = total_loss
         
         self.log(
             f"{stage}_loss", loss,
