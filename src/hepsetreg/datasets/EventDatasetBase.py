@@ -269,7 +269,7 @@ class ClassificationEventDataset(Dataset):
         real jet.
     """
 
-    def __init__(self, source, *, features, bin_edges, indices=None, stats=None, keep_unscaled_data=False, max_jets=None):
+    def __init__(self, source, *, features, feature_bin_edges, indices=None, stats=None, keep_unscaled_data=False, max_jets=None):
         global_arr, jet_arr, lepton_arr, target_arr = (
             load_arrays(source, features) if isinstance(source, str) else source
         )
@@ -277,16 +277,22 @@ class ClassificationEventDataset(Dataset):
         if indices is None:
             indices = np.arange(len(global_arr))
 
-        #Filter out indices with values outside the binning range
-        indices = indices[ (target_arr[:,0] >= bin_edges[0]) & (target_arr[:,0] < bin_edges[-1]) ]
+        #Iterate through each target feature's individual binning
+        for i,bin_edges in enumerate(feature_bin_edges):
+
+            #Filter out indices with values outside the binning range
+            indices = indices[ (target_arr[:,0] >= bin_edges[0]) & (target_arr[:,0] < bin_edges[-1]) ]
+
+            #Apply filter to target array before binning
+            target_arr = target_arr[indices]
+
+            #Bin the target array according to the bin edges
+            target_arr[:,i] = np.digitize(target_arr[:,i],bin_edges)-1
 
         indices = np.asarray(indices)
         n_events = len(indices)
 
         global_arr = global_arr[indices]
-
-        #Bin the target array according to the bin edges
-        target_arr = np.digitize(target_arr[indices],bin_edges)-1
 
         jet_sub = jet_arr[indices]
         lepton_sub = lepton_arr[indices]
@@ -577,7 +583,7 @@ class ClassificationEventDataModule(pl.LightningDataModule):
     """
 
     def __init__(
-        self, train_path, val_path, *, features, bin_edges, batch_size=256, num_workers=0,
+        self, train_path, val_path, *, features, feature_bin_edges, batch_size=256, num_workers=0,
         persistent_workers=False, keep_unscaled_data=False, max_jets=None,
         device=None,
     ):
@@ -585,7 +591,7 @@ class ClassificationEventDataModule(pl.LightningDataModule):
         self.train_path = train_path
         self.val_path = val_path
         self.features = features
-        self.bin_edges = bin_edges
+        self.feature_bin_edges = feature_bin_edges
         self.batch_size = batch_size
         self.device = torch.device(device) if device is not None else None
         if self.device is not None and self.device.type == "cuda":
@@ -598,12 +604,12 @@ class ClassificationEventDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         self.train_dataset = ClassificationEventDataset(
-            self.train_path, features=self.features, bin_edges = self.bin_edges,
+            self.train_path, features=self.features, feature_bin_edges = self.feature_bin_edges,
             keep_unscaled_data=self.keep_unscaled_data, max_jets=self.max_jets,
         )  # fits stats (and, if not given, max_jets) on train
         self.stats = self.train_dataset.stats
         self.val_dataset = ClassificationEventDataset(
-            self.val_path, features=self.features, stats=self.stats, bin_edges = self.bin_edges,
+            self.val_path, features=self.features, stats=self.stats, feature_bin_edges = self.feature_bin_edges,
             keep_unscaled_data=self.keep_unscaled_data, max_jets=self.train_dataset.max_jets,
         )  # reuse them
         if self.device is not None:
