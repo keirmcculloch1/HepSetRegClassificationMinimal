@@ -17,6 +17,8 @@ from hepsetreg.losses.losses import RegressionLoss
 
 import torch.nn as nn
 
+import numpy as np
+
 class EventRegressionModule(pl.LightningModule):
     def __init__(self, model, learning_rate=1e-3, weight_decay=0.0, loss_kind="mse", scheduler_fn=None):
         super().__init__()
@@ -114,8 +116,15 @@ class EventClassificationModule(pl.LightningModule):
         unscale once at the end -- Trainer.predict() already handles model
         eval-mode, no_grad, and per-batch device transfer, so there's no
         manual loop or .to(device) needed on the caller's side."""
-        pred = self.model(batch)
-        return {"pred": pred.cpu(), "target": batch["target"].cpu()}
+        preds = self.model(batch)
+        print("Preds shape",len(preds),len(preds[0]),len(preds[0][0]))
+        #Preds is a tuple so iterate through each sub-tensor to apply .cpu()
+        pred_value = []
+        target_value = np.empty((len(preds)))
+        for i, pred in enumerate(preds):
+            pred_value.append(pred.cpu())
+            np.append(target_value,batch["target"][:,i].cpu())
+        return {"pred": pred_value, "target": torch.from_numpy(target_value)}
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate,
