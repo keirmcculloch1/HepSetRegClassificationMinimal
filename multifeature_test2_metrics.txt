@@ -1,0 +1,9 @@
+multifeature_test2
+	ttbar_mass
+		accuracy: 0.1364
+		precision: 0.1289
+		recall: 0.1364
+	ttbar_pt
+		accuracy: 0.1688
+		precision: 0.1602
+		recall: 0.1688

@@ -33,6 +33,8 @@ from hepsetreg.config import load_config
 from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate
 from hepsetreg.training.lightning_module import EventClassificationModule
 
+import sklearn.metrics as metrics
+
 #Include binning parameters in model keys for predictions
 MODEL_KEYS = ["d_model", "nhead", "num_layers", "binning"]
 
@@ -173,7 +175,30 @@ def predict(config):
         print(f"{name:12s} MAE: {value:.4f}")
 
     #Output the accuracy
-    print(f"Accuracy: {accuracy:.4f}")
+    #print(f"Accuracy: {accuracy:.4f}")
+
+    #List of metrics to calculate and save
+    performance_metrics = [
+        {"function" : metrics.accuracy_score, "name" : "accuracy", "kwargs" : {}},
+        {"function" : metrics.precision_score, "name" : "precision", "kwargs" : {"average" : "weighted"}},
+        {"function" : metrics.recall_score, "name" : "recall", "kwargs" : {"average" : "weighted"}},
+    ]
+
+    #Save performance metrics to a file instead of cluttering with too many print statements
+    run_name = config.get("run_name")
+    with open(run_name+"_metrics.txt","w") as writefile:
+        writefile.write(run_name+"\n")
+
+        #Seperate metrics for each feature
+        for i,feature in enumerate(target_features):
+            writefile.write(f"\t{feature}\n")
+
+            for perf_metric in performance_metrics:
+                #Slice targets and predictions to only compare for the feature
+                #Pass in kwargs using the dictionary
+                score = perf_metric["function"](targets[:,i],preds[:,i],**perf_metric["kwargs"])
+
+                writefile.write(f"\t\t{perf_metric["name"]}: {score:.4f}\n")
 
     # save predictions + targets to parquet, as two record groups -- e.g.
     # arr.targets.ttbar_mass, arr.predictions.ttbar_mass

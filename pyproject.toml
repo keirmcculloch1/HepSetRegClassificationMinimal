@@ -27,6 +27,7 @@ dependencies = [
     "uproot>=5.7.6",
     "vector>=1.8.1",
     "matplotlib>=3.8",
+    "scikit-learn>=1.9.1",
 ]
 
 [project.optional-dependencies]
