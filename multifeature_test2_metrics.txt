@@ -1,9 +1,13 @@
-multifeature_test2
+Performance metrics:
 	ttbar_mass
 		accuracy: 0.1364
 		precision: 0.1289
 		recall: 0.1364
+		f1_score: 0.1262
+		top_k_accuracy: 0.2610
 	ttbar_pt
 		accuracy: 0.1688
 		precision: 0.1602
 		recall: 0.1688
+		f1_score: 0.1625
+		top_k_accuracy: 0.3247

@@ -160,6 +160,9 @@ def predict(config):
 
     targets = torch.cat([out["target"] for out in outputs])
 
+    #Prediction probabilities (not necessary for calculating predictions but useful for performance metrics)
+    pred_probs = [torch.softmax(x, dim=-1) for x in pred_logits]
+
     #Bin prediction is highest value logit index
     preds = torch.stack( [torch.argmax(x, dim=-1) for x in pred_logits], dim=1)
 
@@ -179,24 +182,32 @@ def predict(config):
 
     #List of metrics to calculate and save
     performance_metrics = [
-        {"function" : metrics.accuracy_score, "name" : "accuracy", "kwargs" : {}},
-        {"function" : metrics.precision_score, "name" : "precision", "kwargs" : {"average" : "weighted"}},
-        {"function" : metrics.recall_score, "name" : "recall", "kwargs" : {"average" : "weighted"}},
+        {"function" : metrics.accuracy_score, "use_prob" : False, "name" : "accuracy", "kwargs" : {}},
+        {"function" : metrics.precision_score, "use_prob" : False, "name" : "precision", "kwargs" : {"average" : "weighted"}},
+        {"function" : metrics.recall_score, "use_prob" : False, "name" : "recall", "kwargs" : {"average" : "weighted"}},
+        {"function" : metrics.f1_score, "use_prob" : False, "name" : "f1_score", "kwargs" : {"average" : "weighted"}},
+        {"function" : metrics.top_k_accuracy_score, "use_prob" : True, "name" : "top_k_accuracy", "kwargs" : {}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements
     run_name = config.get("run_name")
     with open(run_name+"_metrics.txt","w") as writefile:
-        writefile.write(run_name+"\n")
+        writefile.write("Performance metrics:"+"\n")
 
         #Seperate metrics for each feature
         for i,feature in enumerate(target_features):
             writefile.write(f"\t{feature}\n")
 
             for perf_metric in performance_metrics:
-                #Slice targets and predictions to only compare for the feature
-                #Pass in kwargs using the dictionary
-                score = perf_metric["function"](targets[:,i],preds[:,i],**perf_metric["kwargs"])
+                #Certain metrics use the probabilities instead of the final predictions
+                if perf_metric["use_prob"]:
+                    #Slice targets and probabilities to only compare for the feature
+                    #Pass in kwargs using the dictionary
+                    score = perf_metric["function"](targets[:,i],pred_probs[i],labels=np.arange(pred_probs[i].shape[1]),**perf_metric["kwargs"])
+                else:
+                    #Slice targets and predictions to only compare for the feature
+                    #Pass in kwargs using the dictionary
+                    score = perf_metric["function"](targets[:,i],preds[:,i],**perf_metric["kwargs"])
 
                 writefile.write(f"\t\t{perf_metric["name"]}: {score:.4f}\n")
 
