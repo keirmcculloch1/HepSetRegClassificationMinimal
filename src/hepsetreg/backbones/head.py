@@ -11,6 +11,10 @@ import torch.nn as nn
 
 import numpy as np
 
+import awkward as ak
+
+import itertools
+
 class RegressionHead(nn.Module):
     """Simple MLP mapping a pooled embedding to the regression targets.
 
@@ -38,6 +42,19 @@ class RegressionHead(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+def to_nested_list(x: torch.Tensor, sizes: list[int]):
+    """
+    x:     (N, sum(sizes)) tensor, features concatenated along dim 1
+    sizes: [i, j, k, ...] classes per feature (length M)
+    returns: list of N lists, each with M tensors of shape (sizes[m],)
+    """
+    N, M = x.shape[0], len(sizes)
+    assert x.shape[1] == sum(sizes)
+
+    flat = x.contiguous().view(-1)           # row-major: row0 feats, row1 feats, ...
+    pieces = flat.split(sizes * N)           # single call -> N*M views
+    return [pieces[n * M:(n + 1) * M] for n in range(N)]  # tuple slices are cheap
 
 class ClassificationHead(nn.Module):
     """Simple MLP mapping a pooled embedding to the classification targets.
@@ -75,6 +92,18 @@ class ClassificationHead(nn.Module):
     def forward(self, x):
         #Reshape output into an awkward array with length equal to the number of features
         #Each sub-array is a number of logits corresponding to the number of classes for that feature
+        ######net_output = self.net(x)
+        #######split_array = torch.split(net_output,self.classes_per_feature,dim=-1)
+        #Reshape awkard array to have length equal to the batch size
+        #split_transpose = list(map(list, itertools.zip_longest(*split_array, fillvalue=None)))
+        ##split_transpose = [ [feature[i] for feature in split_array] for i in range((net_output).shape[0]) ]
+        #feature_indices = [0] + self.classes_per_feature
+        ###split_array = [[net_output[i][feature_indices[j]:np.sum(feature_indices[:j+2])] for j in range(len(feature_indices)-1)] for i in range(len(net_output))]
+
+        #split_output = [net_output[:,feature_indices[j]:np.sum(feature_indices[:j+2])] for j in range(len(feature_indices)-1)]
+
+        #return to_nested_list(self.net(x),self.classes_per_feature)
+
         return torch.split(self.net(x),self.classes_per_feature,dim=-1)
 
 

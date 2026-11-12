@@ -153,9 +153,14 @@ def predict(config):
     trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
     outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
 
+    print("Outputs:",flush=True)
+    #print(outputs,flush=True)
+    #print(ak.type(outputs),flush=True)
+
     #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
     #pred_logits = torch.cat([out["pred"] for out in outputs])
-    pred_logits = ak.concatenate([out["pred"] for out in outputs])
+    #pred_logits = ak.concatenate([out["pred"] for out in outputs],axis=1)
+    pred_logits = [ torch.cat( [out["pred"][i] for out in outputs], dim=0) for i in range(len(target_features)) ]
 
     #Targets is Nx1, slice it to prevent shape issues
     targets = torch.cat([out["target"] for out in outputs])
@@ -166,15 +171,25 @@ def predict(config):
 
     #Bin prediction is highest probability index
     #preds = torch.argmax(pred_probs,dim=1)
-    preds = ak.argmax(pred_logits,axis=-1)
+    #preds = ak.argmax(pred_logits,axis=-1)
+    preds = torch.stack( [torch.argmax(x, dim=-1) for x in pred_logits], dim=1)
+
+    print("Shapes:",flush=True)
+    print(targets.shape,flush=True)
+    print(ak.type(pred_logits),flush=True)
+    print(ak.type(preds),flush=True)
+    print(len(preds[0]))
+    print(np.shape(ak.to_numpy(preds)))
 
     #preds = torch.from_numpy(ak.to_numpy(preds))
 
     #MAE is not a relevant/useful metric for classification
-    mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
+    #mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
+    mae = ak.mean(np.abs(preds - targets), axis=0)
 
     #Accuracy is the proportion of events guess correctly
-    accuracy = (preds == targets).float().mean()
+    #accuracy = (preds == targets).float().mean()
+    accuracy = ak.mean(preds == targets)
 
     for name, value in zip(target_features, mae):
         print(f"{name:12s} MAE: {value:.4f}")

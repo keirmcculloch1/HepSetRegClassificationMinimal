@@ -88,8 +88,8 @@ class EventClassificationModule(pl.LightningModule):
 
         total_loss = 0
 
-        for i, pred in enumerate(preds):
-            total_loss += self.loss_fn(pred, batch["target"][:, i])
+        for i, feature in enumerate(preds):
+            total_loss += self.loss_fn(feature, batch["target"][:, i])
 
         #Average losses
         #loss /= len(preds)
@@ -117,14 +117,17 @@ class EventClassificationModule(pl.LightningModule):
         eval-mode, no_grad, and per-batch device transfer, so there's no
         manual loop or .to(device) needed on the caller's side."""
         preds = self.model(batch)
-        print("Preds shape",len(preds),len(preds[0]),len(preds[0][0]))
+        #print(batch["target"],flush=True)
+        #print(batch["target"].shape,flush=True)
         #Preds is a tuple so iterate through each sub-tensor to apply .cpu()
-        pred_value = []
-        target_value = np.empty((len(preds)))
-        for i, pred in enumerate(preds):
-            pred_value.append(pred.cpu())
-            np.append(target_value,batch["target"][:,i].cpu())
-        return {"pred": pred_value, "target": torch.from_numpy(target_value)}
+        #pred_value = [[]] * len(preds)
+        ###target_value = np.empty((len(preds)))
+        #for i, pred in enumerate(preds):
+        #    for logits in pred:
+        #        pred_value[i].append(logits.cpu())
+            ###np.append(target_value,batch["target"].T.cpu())
+        ###return {"pred": pred_value, "target": torch.from_numpy(target_value)}
+        return {"pred": [pred.cpu() for pred in preds], "target": batch["target"].cpu()}
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate,
