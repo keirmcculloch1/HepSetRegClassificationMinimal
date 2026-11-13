@@ -90,7 +90,7 @@ def frequencies(bin_values,config,feature_name):
 
 #Sum of top-k accuracy scores with each contribution weighted by k
 #Eg. for top-1 accuracy of 0.1 and top-2 accuracy of 0.22 the total would be 0.1+(0.12/2)=0.16
-def weighted_top_k_accuracy(targets,prediction_logits):
+def weighted_top_k_accuracy_sum(targets,prediction_logits):
 
     #Total number of classes
     num_classes = len(prediction_logits[0])
@@ -299,7 +299,7 @@ def predict(config):
         {"function" : lambda t, p : scipy.stats.chisquare(p,t).statistic/(len(t)-1), "name" : "reduced scipy_chi2", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
         {"function" : ks_binned, "name" : "kolmogorov-smirnov", "targets" : "continuous", "predictions" : "frequencies", "kwargs" : lambda i : {"bin_edges" : feature_bin_edges[i]}},
         {"function" : lambda t, p : np.sum(scipy.special.kl_div(p,t)), "name" : "kullback-leibler", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
-        {"function" : weighted_top_k_accuracy, "name" : "weighted top k accuracy", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {}},
+        {"function" : weighted_top_k_accuracy_sum, "name" : "weighted top k accuracy sum", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements
