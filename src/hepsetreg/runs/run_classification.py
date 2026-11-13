@@ -88,6 +88,39 @@ def frequencies(bin_values,config,feature_name):
 
     return np.bincount(bin_values,minlength=number_of_bins)
 
+#Sum of top-k accuracy scores with each contribution weighted by k
+#Eg. for top-1 accuracy of 0.1 and top-2 accuracy of 0.22 the total would be 0.1+(0.12/2)=0.16
+def weighted_top_k_accuracy(targets,prediction_logits):
+
+    #Total number of classes
+    num_classes = len(prediction_logits[0])
+
+    #Prevent issues when one of the classes doesn't appear
+    labels = np.arange(num_classes)
+
+    #Final output for this function, weighted sum of contributions
+    total_accuracy_score = 0
+
+    #Used to calculate differences
+    previous_accuracy_score = 0
+
+    #Loop from 1 to the number of classes
+    for i in range(1,num_classes+1):
+
+        #Calculate top-i accuracy
+        current_accuracy_score = metrics.top_k_accuracy_score(targets,prediction_logits,labels=labels,k=i)
+
+        #Calculate contribution (difference)
+        accuracy_difference = current_accuracy_score - previous_accuracy_score
+
+        #Add weighted contribution
+        total_accuracy_score += current_accuracy_score/i
+
+        #Update previous accuracy score
+        previous_accuracy_score = current_accuracy_score
+
+    return total_accuracy_score
+
 #Kolmogorov-Smirnov (KS) metric
 #Takes bin frequencies and equally spreads the number of values inside a bin across that bin to produce the CDF
 #Calculates the KS based off of this "continuous" CDF with the true continuous targets
@@ -262,10 +295,11 @@ def predict(config):
         {"function" : metrics.precision_score, "name" : "precision", "targets" : "binned", "predictions" : "binned", "kwargs" : lambda i : {"average" : "weighted"}},
         {"function" : metrics.recall_score, "name" : "recall", "targets" : "binned", "predictions" : "binned", "kwargs" : lambda i : {"average" : "weighted"}},
         {"function" : metrics.f1_score, "name" : "f1_score", "targets" : "binned", "predictions" : "binned", "kwargs" : lambda i : {"average" : "weighted"}},
-        {"function" : metrics.top_k_accuracy_score, "name" : "top_k_accuracy", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {"labels" : np.arange(len(pred_probs[i][0]))}},
+        {"function" : metrics.top_k_accuracy_score, "name" : "top 2 accuracy", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {"k" : 2, "labels" : np.arange(len(pred_logits[i][0]))}},
         {"function" : lambda t, p : scipy.stats.chisquare(p,t).statistic/(len(t)-1), "name" : "reduced scipy_chi2", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
         {"function" : ks_binned, "name" : "kolmogorov-smirnov", "targets" : "continuous", "predictions" : "frequencies", "kwargs" : lambda i : {"bin_edges" : feature_bin_edges[i]}},
         {"function" : lambda t, p : np.sum(scipy.special.kl_div(p,t)), "name" : "kullback-leibler", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
+        {"function" : weighted_top_k_accuracy, "name" : "weighted top k accuracy", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements
