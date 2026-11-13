@@ -37,6 +37,8 @@ import sklearn.metrics as metrics
 
 import scipy.stats
 
+import scipy.special
+
 #Include binning parameters in model keys for predictions
 MODEL_KEYS = ["d_model", "nhead", "num_layers", "binning"]
 
@@ -263,6 +265,7 @@ def predict(config):
         {"function" : metrics.top_k_accuracy_score, "name" : "top_k_accuracy", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {"labels" : np.arange(len(pred_probs[i][0]))}},
         {"function" : lambda t, p : scipy.stats.chisquare(p,t).statistic/(len(t)-1), "name" : "reduced scipy_chi2", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
         {"function" : ks_binned, "name" : "kolmogorov-smirnov", "targets" : "continuous", "predictions" : "frequencies", "kwargs" : lambda i : {"bin_edges" : feature_bin_edges[i]}},
+        {"function" : lambda t, p : np.sum(scipy.special.kl_div(p,t)), "name" : "kullback-leibler", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements
