@@ -78,13 +78,29 @@ def unbin(bins,config,feature_name):
     max_value = config["binning"][feature_name]["right_edge"]
     number_of_bins = config["binning"][feature_name]["num_bins"]
 
-    return min_value + (bins/number_of_bins) * (max_value-min_value)
+    return min_value + (bins/number_of_bins + 0.5) * (max_value-min_value)
 
 def frequencies(bin_values,config,feature_name):
 
     number_of_bins = config["binning"][feature_name]["num_bins"]
 
     return np.bincount(bin_values,minlength=number_of_bins)
+
+#Kolmogorov-Smirnov (KS) metric
+#Takes bin frequencies and equally spreads the number of values inside a bin across that bin to produce the CDF
+#Calculates the KS based off of this "continuous" CDF with the true continuous targets
+def ks_binned(continuous_targets, pred_frequencies, bin_edges):
+
+    #Normalise cumulative sum and add a 0 value to the beginning
+    cdf_vals = np.concatenate([[0.0], np.cumsum(pred_frequencies) / np.sum(pred_frequencies)])
+
+    #Create the CDF by interpolating the frequencies across the bins
+    cdf = lambda x: np.interp(x, bin_edges, cdf_vals)
+
+    #Calculate KS metric from the observations (targets) against the CDF (predictions)
+    res = scipy.stats.ks_1samp(continuous_targets, cdf)
+
+    return res.statistic
 
 def train(config):
     # Not a hyperparameter -- an environment setting. PyTorch defaults to
@@ -172,36 +188,40 @@ def predict(config):
     outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
 
     #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
-    pred_logits = [ torch.cat( [out["pred"][i] for out in outputs], dim=0) for i in range(len(target_features)) ]
+    #pred_logits = [ torch.cat( [out["pred"][i] for out in outputs], dim=0) for i in range(len(target_features)) ]
+    pred_logits = [torch.cat([out["pred"][i] for out in outputs]) for i in range(len(target_features))]
 
     #Binned target values
-    targets = torch.cat([out["target"] for out in outputs])
+    targets = [torch.cat([out["target"][:,i] for out in outputs]) for i in range(len(target_features))]
 
     #Original continuous target values for peformance metrics
     #continuous_targets = np.array(load_arrays(config["data_path"],model_config["features"])[3])
-    continuous_targets = ds.target_tensor.numpy()
+    continuous_targets = np.array([ds.target_tensor.numpy()[:,i] for i in range(len(target_features))])
 
     #Frequency with which each bin appears
-    target_frequencies = [frequencies(targets[:,i],config,feature) for i,feature in enumerate(target_features)]
+    target_frequencies = [frequencies(targets[i],config,feature) for i,feature in enumerate(target_features)]
     #Filter out zero frequency values to prevent divide by zero errors
     filter_zero_map = [feature_freq != 0 for feature_freq in target_frequencies]
     #Apply filter
-    target_frequencies = [feature_freq[filter_zero_map[i]] for i,feature_freq in enumerate(target_frequencies)]
+    filtered_target_frequencies = [t_feature_freq[filter_zero_map[i]] for i,t_feature_freq in enumerate(target_frequencies)]
 
     #Prediction probabilities for performance metrics (not necessary for calculating predictions)
-    pred_probs = [torch.softmax(x, dim=-1) for x in pred_logits]
+    #pred_probs = [torch.softmax(x, dim=-1) for x in pred_logits]
+    pred_probs = [[torch.softmax(event, dim=-1) for event in feature] for feature in pred_logits]
 
     #Bin prediction is highest value logit index
-    preds = torch.stack( [torch.argmax(x, dim=-1) for x in pred_logits], dim=1)
+    #preds = torch.stack( [torch.argmax(x, dim=-1) for x in pred_logits], dim=1)
+    preds = torch.tensor([[torch.argmax(event, dim=-1) for event in feature] for feature in pred_logits])
 
     #Unbinned prediction values for comparison to continuous target values
-    unbinned_preds = np.dstack([unbin(preds[:,i],config,feature) for i,feature in enumerate(target_features)])[0]
+    #unbinned_preds = np.dstack([unbin(preds[i],config,feature) for i,feature in enumerate(target_features)])[0]
+    unbinned_preds = np.array([unbin(preds[i],config,feature) for i,feature in enumerate(target_features)])
 
     #Frequency with which each bin appears
-    pred_frequencies = [frequencies(preds[:,i],config,feature) for i,feature in enumerate(target_features)]
+    pred_frequencies = [frequencies(preds[i],config,feature) for i,feature in enumerate(target_features)]
     #Apply the same filter as the targets
     #The predictions can have zero frequency bins without divide by zero errors
-    pred_frequencies = [feature_freq[filter_zero_map[i]] for i,feature_freq in enumerate(pred_frequencies)]
+    filtered_pred_frequencies = [p_feature_freq[filter_zero_map[i]] for i,p_feature_freq in enumerate(pred_frequencies)]
 
     #mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
     #mae = ak.mean(np.abs(preds - targets), axis=0)
@@ -209,64 +229,63 @@ def predict(config):
     mae = np.mean(np.abs(unbinned_preds - continuous_targets),axis=0)
 
     #Accuracy is the proportion of events guess correctly
-    accuracy = (preds == targets).float().mean()
+    #accuracy = (preds == targets).float().mean()
     #accuracy = ak.mean(preds == targets)
+    accuracy = np.mean(preds == targets)
 
     for name, value in zip(target_features, mae):
         print(f"{name:12s} MAE: {value:.4f}")
 
+    #Different ways of expressing the target data depending on the metric
+    target_datasets = {
+        "binned" : targets,
+        "continuous" : continuous_targets,
+        "frequencies" : target_frequencies,
+        "filtered frequencies" : filtered_target_frequencies,
+    }
+
+    #Different ways of expressing the predictions depending on the metric
+    prediction_datasets = {
+        "logits" : pred_logits,
+        "probabilities" : pred_probs,
+        "binned" : preds,
+        "unbinned" : unbinned_preds,
+        "frequencies" : pred_frequencies,
+        "filtered frequencies" : filtered_pred_frequencies,
+    }
+
     #List of metrics to calculate and save
     performance_metrics = [
-        {"function" : metrics.accuracy_score, "data" : "bins", "name" : "accuracy", "kwargs" : {}},
-        {"function" : metrics.precision_score, "data" : "bins", "name" : "precision", "kwargs" : {"average" : "weighted"}},
-        {"function" : metrics.recall_score, "data" : "bins", "name" : "recall", "kwargs" : {"average" : "weighted"}},
-        {"function" : metrics.f1_score, "data" : "bins", "name" : "f1_score", "kwargs" : {"average" : "weighted"}},
-        {"function" : metrics.top_k_accuracy_score, "data" : "logits", "name" : "top_k_accuracy raw logits", "kwargs" : {}},
-        {"function" : lambda t, p : scipy.stats.chisquare(p,t).statistic/(len(t)-1), "data" : "frequencies", "name" : "reduced scipy_chi2", "kwargs" : {}},
+        {"function" : metrics.accuracy_score, "name" : "accuracy", "targets" : "binned", "predictions" : "binned","kwargs" : lambda i : {}},
+        {"function" : metrics.precision_score, "name" : "precision", "targets" : "binned", "predictions" : "binned", "kwargs" : lambda i : {"average" : "weighted"}},
+        {"function" : metrics.recall_score, "name" : "recall", "targets" : "binned", "predictions" : "binned", "kwargs" : lambda i : {"average" : "weighted"}},
+        {"function" : metrics.f1_score, "name" : "f1_score", "targets" : "binned", "predictions" : "binned", "kwargs" : lambda i : {"average" : "weighted"}},
+        {"function" : metrics.top_k_accuracy_score, "name" : "top_k_accuracy", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {"labels" : np.arange(len(pred_probs[i][0]))}},
+        {"function" : lambda t, p : scipy.stats.chisquare(p,t).statistic/(len(t)-1), "name" : "reduced scipy_chi2", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
+        {"function" : ks_binned, "name" : "kolmogorov-smirnov", "targets" : "continuous", "predictions" : "frequencies", "kwargs" : lambda i : {"bin_edges" : feature_bin_edges[i]}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements
     run_name = config.get("run_name")
     with open(run_name+"_metrics.txt","w") as writefile:
-        writefile.write("Performance metrics:"+"\n")
+        writefile.write("Performance metrics:\n")
 
         #Seperate metrics for each feature
         for i,feature in enumerate(target_features):
             writefile.write(f"\t{feature}\n")
 
             for perf_metric in performance_metrics:
-                #Coninuous/regression metrics
-                if perf_metric["data"] == "continuous":
-                    score = perf_metric["function"](continuous_targets[:,i],unbinned_preds[i],**perf_metric["kwargs"])
 
-                #Certain metrics use the probabilities instead of the final predictions
-                elif perf_metric["data"] == "probabilities":
-                    #Slice targets and probabilities to only compare for the feature
-                    #Pass in kwargs using the dictionary
-                    score = perf_metric["function"](targets[:,i],pred_probs[i],labels=np.arange(pred_probs[i].shape[1]),**perf_metric["kwargs"])
+                score = perf_metric["function"](target_datasets[perf_metric["targets"]][i],prediction_datasets[perf_metric["predictions"]][i],**perf_metric["kwargs"](i))
 
-                #Raw logits
-                elif perf_metric["data"] == "logits":
-                    
-                    score = perf_metric["function"](targets[:,i],pred_logits[i],labels=np.arange(pred_probs[i].shape[1]),**perf_metric["kwargs"])
-
-                elif perf_metric["data"] == "frequencies":
-                    
-                    score = perf_metric["function"](target_frequencies[i],pred_frequencies[i],**perf_metric["kwargs"])
-
-                else:
-                    #Slice targets and predictions to only compare for the feature
-                    #Pass in kwargs using the dictionary
-                    score = perf_metric["function"](targets[:,i],preds[:,i],**perf_metric["kwargs"])
-
-                writefile.write(f"\t\t{perf_metric["name"]}: {score:.4f}\n")
+                writefile.write(f"\t\t{perf_metric['name']}: {score:.4f}\n")
 
     # save predictions + targets to parquet, as two record groups -- e.g.
     # arr.targets.ttbar_mass, arr.predictions.ttbar_mass
     # .contiguous(): a column slice of a 2D tensor is a strided,
     # non-contiguous view, which pyarrow rejects with "ndarray is not contiguous"
-    target_fields = {name: ak.Array(targets[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
-    pred_fields = {name: ak.Array(preds[:, i].contiguous().numpy()) for i, name in enumerate(target_features)}
+    target_fields = {name: ak.Array(targets[i].contiguous().numpy()) for i, name in enumerate(target_features)}
+    pred_fields = {name: ak.Array(preds[i].contiguous().numpy()) for i, name in enumerate(target_features)}
 
     out = ak.zip({"targets": ak.zip(target_fields), "predictions": ak.zip(pred_fields)}, depth_limit=1)
     ak.to_parquet(out, config["output"])
