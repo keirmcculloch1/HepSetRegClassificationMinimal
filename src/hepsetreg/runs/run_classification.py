@@ -121,6 +121,29 @@ def weighted_top_k_accuracy_sum(targets,prediction_logits):
 
     return total_accuracy_score
 
+#Average rank of the target amongst the prediction logits
+#Divided by the number of classes
+def normalised_average_target_rank(targets,prediction_logits):
+
+    #Total number of classes
+    num_classes = len(prediction_logits[0])
+
+    #Unsqueeze turns targets from shape N_events to N_events x 1
+    #Gather gets the logit corresponding to the true target
+    #Resulting in an N_events x 1 array of the logit value of the target classes
+    target_logits = torch.gather(prediction_logits, 1, targets.unsqueeze(1))
+
+    #Pytorch broadcasts target_logits from N_events x 1 to N_events x N_classes, filling each row with the same value
+    #The number of prediction logits greater than the logit corresponding to the target gives the ranking of the target
+    #Eg. if 2 logits are larger than the target logit then the target is ranked #3 (hence the +1)
+    ranks = (prediction_logits > target_logits).sum(dim=1) + 1
+
+    #Take average of the ranks of the targets
+    mean_rank = ranks.float().mean()
+
+    #Divide by the number of classes
+    return mean_rank / num_classes
+
 #Kolmogorov-Smirnov (KS) metric
 #Takes bin frequencies and equally spreads the number of values inside a bin across that bin to produce the CDF
 #Calculates the KS based off of this "continuous" CDF with the true continuous targets
@@ -300,6 +323,7 @@ def predict(config):
         {"function" : ks_binned, "name" : "kolmogorov-smirnov", "targets" : "continuous", "predictions" : "frequencies", "kwargs" : lambda i : {"bin_edges" : feature_bin_edges[i]}},
         {"function" : lambda t, p : np.sum(scipy.special.kl_div(p,t)), "name" : "kullback-leibler", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
         {"function" : weighted_top_k_accuracy_sum, "name" : "weighted top k accuracy sum", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {}},
+        {"function" : normalised_average_target_rank, "name" : "normalised average target rank", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements
