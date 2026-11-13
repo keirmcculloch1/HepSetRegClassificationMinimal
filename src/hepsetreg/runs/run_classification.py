@@ -30,10 +30,12 @@ from torch.utils.data import DataLoader
 from hepsetreg.backbones.backbone import TransformerBackbone
 from hepsetreg.backbones.head import EventClassifier, ClassificationHead
 from hepsetreg.config import load_config
-from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate
+from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate, load_arrays
 from hepsetreg.training.lightning_module import EventClassificationModule
 
 import sklearn.metrics as metrics
+
+import scipy.stats
 
 #Include binning parameters in model keys for predictions
 MODEL_KEYS = ["d_model", "nhead", "num_layers", "binning"]
@@ -69,6 +71,20 @@ def calculate_bin_edges(config,feature_name):
 
     #Equally spaced bins
     return np.linspace(leftmost_bin_edge,rightmost_bin_edge,number_of_bins+1)
+
+def unbin(bins,config,feature_name):
+
+    min_value = config["binning"][feature_name]["left_edge"]
+    max_value = config["binning"][feature_name]["right_edge"]
+    number_of_bins = config["binning"][feature_name]["num_bins"]
+
+    return min_value + (bins/number_of_bins) * (max_value-min_value)
+
+def frequencies(bin_values,config,feature_name):
+
+    number_of_bins = config["binning"][feature_name]["num_bins"]
+
+    return np.bincount(bin_values,minlength=number_of_bins)
 
 def train(config):
     # Not a hyperparameter -- an environment setting. PyTorch defaults to
@@ -146,7 +162,7 @@ def predict(config):
     feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
 
     target_features = model_config["features"]["target"]
-    ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges,stats=stats, max_jets=max_jets)
+    ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges, stats=stats, max_jets=max_jets)
     loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
 
     # Trainer.predict() puts the module in eval mode, disables gradients,
@@ -158,35 +174,51 @@ def predict(config):
     #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
     pred_logits = [ torch.cat( [out["pred"][i] for out in outputs], dim=0) for i in range(len(target_features)) ]
 
+    #Binned target values
     targets = torch.cat([out["target"] for out in outputs])
 
-    #Prediction probabilities (not necessary for calculating predictions but useful for performance metrics)
+    #Original continuous target values for peformance metrics
+    #continuous_targets = np.array(load_arrays(config["data_path"],model_config["features"])[3])
+    continuous_targets = ds.target_tensor.numpy()
+
+    #Frequency with which each bin appears
+    target_frequencies = [frequencies(targets[:,i],config,feature) for i,feature in enumerate(target_features)]
+
+    #Prediction probabilities for performance metrics (not necessary for calculating predictions)
     pred_probs = [torch.softmax(x, dim=-1) for x in pred_logits]
 
     #Bin prediction is highest value logit index
     preds = torch.stack( [torch.argmax(x, dim=-1) for x in pred_logits], dim=1)
 
-    #MAE is not a relevant/useful metric for classification
+    #Unbinned prediction values for comparison to continuous target values
+    unbinned_preds = np.dstack([unbin(preds[:,i],config,feature) for i,feature in enumerate(target_features)])[0]
+
+    #Frequency with which each bin appears
+    pred_frequencies = [frequencies(preds[:,i],config,feature) for i,feature in enumerate(target_features)]
+
+    print(unbinned_preds.shape)
+    print(continuous_targets.shape)
+
     #mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
-    mae = ak.mean(np.abs(preds - targets), axis=0)
+    #mae = ak.mean(np.abs(preds - targets), axis=0)
+    #mae = (unbinned_preds - continuous_targets).abs().float().mean(dim=0)
+    mae = np.mean(np.abs(unbinned_preds - continuous_targets),axis=0)
 
     #Accuracy is the proportion of events guess correctly
-    #accuracy = (preds == targets).float().mean()
-    accuracy = ak.mean(preds == targets)
+    accuracy = (preds == targets).float().mean()
+    #accuracy = ak.mean(preds == targets)
 
     for name, value in zip(target_features, mae):
         print(f"{name:12s} MAE: {value:.4f}")
 
-    #Output the accuracy
-    #print(f"Accuracy: {accuracy:.4f}")
-
     #List of metrics to calculate and save
     performance_metrics = [
-        {"function" : metrics.accuracy_score, "use_prob" : False, "name" : "accuracy", "kwargs" : {}},
-        {"function" : metrics.precision_score, "use_prob" : False, "name" : "precision", "kwargs" : {"average" : "weighted"}},
-        {"function" : metrics.recall_score, "use_prob" : False, "name" : "recall", "kwargs" : {"average" : "weighted"}},
-        {"function" : metrics.f1_score, "use_prob" : False, "name" : "f1_score", "kwargs" : {"average" : "weighted"}},
-        {"function" : metrics.top_k_accuracy_score, "use_prob" : True, "name" : "top_k_accuracy", "kwargs" : {}},
+        {"function" : metrics.accuracy_score, "data" : "bins", "name" : "accuracy", "kwargs" : {}},
+        {"function" : metrics.precision_score, "data" : "bins", "name" : "precision", "kwargs" : {"average" : "weighted"}},
+        {"function" : metrics.recall_score, "data" : "bins", "name" : "recall", "kwargs" : {"average" : "weighted"}},
+        {"function" : metrics.f1_score, "data" : "bins", "name" : "f1_score", "kwargs" : {"average" : "weighted"}},
+        {"function" : metrics.top_k_accuracy_score, "data" : "probabilities", "name" : "top_k_accuracy", "kwargs" : {}},
+        {"function" : lambda t, p : scipy.stats.chisquare(t,p).statistic/(len(t)-2), "data" : "frequencies", "name" : "reduced scipy_chi2", "kwargs" : {}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements
@@ -199,11 +231,20 @@ def predict(config):
             writefile.write(f"\t{feature}\n")
 
             for perf_metric in performance_metrics:
+                #Coninuous/regression metrics
+                if perf_metric["data"] == "continuous":
+                    score = perf_metric["function"](continuous_targets[:,i],unbinned_preds[i],**perf_metric["kwargs"])
+
                 #Certain metrics use the probabilities instead of the final predictions
-                if perf_metric["use_prob"]:
+                elif perf_metric["data"] == "probabilities":
                     #Slice targets and probabilities to only compare for the feature
                     #Pass in kwargs using the dictionary
                     score = perf_metric["function"](targets[:,i],pred_probs[i],labels=np.arange(pred_probs[i].shape[1]),**perf_metric["kwargs"])
+
+                elif perf_metric["data"] == "frequencies":
+                    
+                    score = perf_metric["function"](target_frequencies[i],pred_frequencies[i],**perf_metric["kwargs"])
+
                 else:
                     #Slice targets and predictions to only compare for the feature
                     #Pass in kwargs using the dictionary
