@@ -183,6 +183,10 @@ def predict(config):
 
     #Frequency with which each bin appears
     target_frequencies = [frequencies(targets[:,i],config,feature) for i,feature in enumerate(target_features)]
+    #Filter out zero frequency values to prevent divide by zero errors
+    filter_zero_map = [feature_freq != 0 for feature_freq in target_frequencies]
+    #Apply filter
+    target_frequencies = [feature_freq[filter_zero_map[i]] for i,feature_freq in enumerate(target_frequencies)]
 
     #Prediction probabilities for performance metrics (not necessary for calculating predictions)
     pred_probs = [torch.softmax(x, dim=-1) for x in pred_logits]
@@ -195,9 +199,9 @@ def predict(config):
 
     #Frequency with which each bin appears
     pred_frequencies = [frequencies(preds[:,i],config,feature) for i,feature in enumerate(target_features)]
-
-    print(unbinned_preds.shape)
-    print(continuous_targets.shape)
+    #Apply the same filter as the targets
+    #The predictions can have zero frequency bins without divide by zero errors
+    pred_frequencies = [feature_freq[filter_zero_map[i]] for i,feature_freq in enumerate(pred_frequencies)]
 
     #mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
     #mae = ak.mean(np.abs(preds - targets), axis=0)
@@ -218,7 +222,7 @@ def predict(config):
         {"function" : metrics.recall_score, "data" : "bins", "name" : "recall", "kwargs" : {"average" : "weighted"}},
         {"function" : metrics.f1_score, "data" : "bins", "name" : "f1_score", "kwargs" : {"average" : "weighted"}},
         {"function" : metrics.top_k_accuracy_score, "data" : "probabilities", "name" : "top_k_accuracy", "kwargs" : {}},
-        {"function" : lambda t, p : scipy.stats.chisquare(t,p).statistic/(len(t)-2), "data" : "frequencies", "name" : "reduced scipy_chi2", "kwargs" : {}},
+        {"function" : lambda t, p : scipy.stats.chisquare(p,t).statistic/(len(t)-1), "data" : "frequencies", "name" : "reduced scipy_chi2", "kwargs" : {}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements
