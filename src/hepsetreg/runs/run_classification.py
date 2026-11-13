@@ -221,7 +221,7 @@ def predict(config):
         {"function" : metrics.precision_score, "data" : "bins", "name" : "precision", "kwargs" : {"average" : "weighted"}},
         {"function" : metrics.recall_score, "data" : "bins", "name" : "recall", "kwargs" : {"average" : "weighted"}},
         {"function" : metrics.f1_score, "data" : "bins", "name" : "f1_score", "kwargs" : {"average" : "weighted"}},
-        {"function" : metrics.top_k_accuracy_score, "data" : "probabilities", "name" : "top_k_accuracy", "kwargs" : {}},
+        {"function" : metrics.top_k_accuracy_score, "data" : "logits", "name" : "top_k_accuracy raw logits", "kwargs" : {}},
         {"function" : lambda t, p : scipy.stats.chisquare(p,t).statistic/(len(t)-1), "data" : "frequencies", "name" : "reduced scipy_chi2", "kwargs" : {}},
     ]
 
@@ -244,6 +244,11 @@ def predict(config):
                     #Slice targets and probabilities to only compare for the feature
                     #Pass in kwargs using the dictionary
                     score = perf_metric["function"](targets[:,i],pred_probs[i],labels=np.arange(pred_probs[i].shape[1]),**perf_metric["kwargs"])
+
+                #Raw logits
+                elif perf_metric["data"] == "logits":
+                    
+                    score = perf_metric["function"](targets[:,i],pred_logits[i],labels=np.arange(pred_probs[i].shape[1]),**perf_metric["kwargs"])
 
                 elif perf_metric["data"] == "frequencies":
                     
