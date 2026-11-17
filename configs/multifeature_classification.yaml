@@ -10,10 +10,12 @@ features:
 # binning
 binning:
   ttbar_mass:
+    method: percentile
     left_edge: 320
     right_edge: 640
     num_bins: 32
   ttbar_pt:
+    method: equal_width
     left_edge: 0
     right_edge: 200
     num_bins: 50

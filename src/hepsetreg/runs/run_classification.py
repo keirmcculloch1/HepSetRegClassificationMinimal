@@ -67,20 +67,34 @@ def build_model(config):
 def calculate_bin_edges(config,feature_name):
 
     #Load binning parameters
+    binning_method = config["binning"][feature_name]["method"]
     leftmost_bin_edge = config["binning"][feature_name]["left_edge"]
     rightmost_bin_edge = config["binning"][feature_name]["right_edge"]
     number_of_bins = config["binning"][feature_name]["num_bins"]
 
-    #Equally spaced bins
-    return np.linspace(leftmost_bin_edge,rightmost_bin_edge,number_of_bins+1)
+    #Check the binning method
+    if binning_method == "percentile":
+        #Generate the percentiles according to the number of bins
+        percentiles = np.linspace(0, 100, number_of_bins+1)
 
-def unbin(bins,config,feature_name):
+        #Load the target array to calculate the bin edges from the percentiles
+        target_arr_features = config["features"].copy()
+        target_arr_features["target"] = [feature_name]
+        target_arr = (load_arrays(config["train_path"], target_arr_features))[3]
 
-    min_value = config["binning"][feature_name]["left_edge"]
-    max_value = config["binning"][feature_name]["right_edge"]
-    number_of_bins = config["binning"][feature_name]["num_bins"]
+        #Filter the target array to only include values inside the bin edges
+        edge_mask = ((target_arr >= leftmost_bin_edge) & (target_arr < rightmost_bin_edge))
+        filtered_target_arr = target_arr[edge_mask]
 
-    return min_value + (bins/number_of_bins + 0.5) * (max_value-min_value)
+        #Return percentile-based bins (each bin has (100/N_bins)% of the total events)
+        return np.percentile(filtered_target_arr,percentiles)
+    else:
+        #Equally spaced bins
+        return np.linspace(leftmost_bin_edge,rightmost_bin_edge,number_of_bins+1)
+
+def unbin(bins,bin_edges):
+
+    return [(bin_edges[bin_val] + bin_edges[bin_val + 1]) / 2 for bin_val in bins]
 
 def frequencies(bin_values,config,feature_name):
 
@@ -210,7 +224,7 @@ def train(config):
     model_config = {key: config[key] for key in MODEL_KEYS}
     model_config["features"] = config["features"]
     torch.save(
-        {"stats": dm.stats, "max_jets": dm.train_dataset.max_jets, "model_config": model_config},
+        {"stats": dm.stats, "max_jets": dm.train_dataset.max_jets, "model_config": model_config, "bin_edges" : feature_bin_edges},
         f"{logger.log_dir}/stats.pt",
     )
     print(f"done training. checkpoint + stats saved under {logger.log_dir}")
@@ -221,7 +235,7 @@ def predict(config):
 
     checkpoint = torch.load(config["checkpoint"], map_location="cpu", weights_only=False)
     saved = torch.load(config["stats"], map_location="cpu")
-    stats, max_jets, model_config = saved["stats"], saved["max_jets"], saved["model_config"]
+    stats, max_jets, model_config, feature_bin_edges = saved["stats"], saved["max_jets"], saved["model_config"], saved["bin_edges"]
 
     model = build_model(model_config)
     module = EventClassificationModule(model)
@@ -232,8 +246,8 @@ def predict(config):
     module.load_state_dict(state_dict)
 
     #Calculate bin edges for each target feature
-    features = config["features"]
-    feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
+    #features = config["features"]
+    #feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
 
     target_features = model_config["features"]["target"]
     ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges, stats=stats, max_jets=max_jets)
@@ -254,7 +268,7 @@ def predict(config):
 
     #Original continuous target values for peformance metrics
     #continuous_targets = np.array(load_arrays(config["data_path"],model_config["features"])[3])
-    continuous_targets = np.array([ds.target_tensor.numpy()[:,i] for i in range(len(target_features))])
+    continuous_targets = [ds.continuous_target_tensor[:,i] for i in range(len(target_features))]
 
     #Frequency with which each bin appears
     target_frequencies = [frequencies(targets[i],config,feature) for i,feature in enumerate(target_features)]
@@ -273,7 +287,7 @@ def predict(config):
 
     #Unbinned prediction values for comparison to continuous target values
     #unbinned_preds = np.dstack([unbin(preds[i],config,feature) for i,feature in enumerate(target_features)])[0]
-    unbinned_preds = np.array([unbin(preds[i],config,feature) for i,feature in enumerate(target_features)])
+    unbinned_preds = np.array([unbin(preds[i],feature_bin_edges[i]) for i,feature in enumerate(target_features)])
 
     #Frequency with which each bin appears
     pred_frequencies = [frequencies(preds[i],config,feature) for i,feature in enumerate(target_features)]
@@ -284,7 +298,7 @@ def predict(config):
     #mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
     #mae = ak.mean(np.abs(preds - targets), axis=0)
     #mae = (unbinned_preds - continuous_targets).abs().float().mean(dim=0)
-    mae = np.mean(np.abs(unbinned_preds - continuous_targets),axis=0)
+    mae = np.mean(np.abs(unbinned_preds - np.array(continuous_targets)),axis=0)
 
     #Accuracy is the proportion of events guess correctly
     #accuracy = (preds == targets).float().mean()
@@ -314,6 +328,7 @@ def predict(config):
 
     #List of metrics to calculate and save
     performance_metrics = [
+        {"function" : lambda t, p : np.mean(np.abs(p - np.array(t)),axis=0), "name" : "mean absolute error", "targets" : "continuous", "predictions" : "unbinned","kwargs" : lambda i : {}},
         {"function" : metrics.accuracy_score, "name" : "accuracy", "targets" : "binned", "predictions" : "binned","kwargs" : lambda i : {}},
         {"function" : metrics.precision_score, "name" : "precision", "targets" : "binned", "predictions" : "binned", "kwargs" : lambda i : {"average" : "weighted"}},
         {"function" : metrics.recall_score, "name" : "recall", "targets" : "binned", "predictions" : "binned", "kwargs" : lambda i : {"average" : "weighted"}},
@@ -347,8 +362,9 @@ def predict(config):
     # non-contiguous view, which pyarrow rejects with "ndarray is not contiguous"
     target_fields = {name: ak.Array(targets[i].contiguous().numpy()) for i, name in enumerate(target_features)}
     pred_fields = {name: ak.Array(preds[i].contiguous().numpy()) for i, name in enumerate(target_features)}
+    continuous_target_fields = {name: ak.Array(continuous_targets[i].contiguous().numpy()) for i, name in enumerate(target_features)}
 
-    out = ak.zip({"targets": ak.zip(target_fields), "predictions": ak.zip(pred_fields)}, depth_limit=1)
+    out = ak.zip({"targets": ak.zip(target_fields), "predictions": ak.zip(pred_fields), "continuous_targets": ak.zip(continuous_target_fields)}, depth_limit=1)
     ak.to_parquet(out, config["output"])
     print(f"saved predictions to {config['output']}")
 

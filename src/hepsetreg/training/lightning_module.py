@@ -19,6 +19,32 @@ import torch.nn as nn
 
 import numpy as np
 
+#Causes circular import issue atm - therefore defined again in this file
+#Should put these functions in a seperate file at some point
+
+#Average rank of the target amongst the prediction logits
+#Divided by the number of classes
+def normalised_average_target_rank(targets,prediction_logits):
+
+    #Total number of classes
+    num_classes = len(prediction_logits[0])
+
+    #Unsqueeze turns targets from shape N_events to N_events x 1
+    #Gather gets the logit corresponding to the true target
+    #Resulting in an N_events x 1 array of the logit value of the target classes
+    target_logits = torch.gather(prediction_logits, 1, targets.unsqueeze(1))
+
+    #Pytorch broadcasts target_logits from N_events x 1 to N_events x N_classes, filling each row with the same value
+    #The number of prediction logits greater than the logit corresponding to the target gives the ranking of the target
+    #Eg. if 2 logits are larger than the target logit then the target is ranked #3 (hence the +1)
+    ranks = (prediction_logits > target_logits).sum(dim=1) + 1
+
+    #Take average of the ranks of the targets
+    mean_rank = ranks.float().mean()
+
+    #Divide by the number of classes
+    return mean_rank / num_classes
+
 class EventRegressionModule(pl.LightningModule):
     def __init__(self, model, learning_rate=1e-3, weight_decay=0.0, loss_kind="mse", scheduler_fn=None):
         super().__init__()
@@ -90,6 +116,8 @@ class EventClassificationModule(pl.LightningModule):
 
         for i, feature in enumerate(preds):
             total_loss += self.loss_fn(feature, batch["target"][:, i])
+
+            #total_loss += normalised_average_target_rank(batch["target"][:,i],feature)
 
         #Average losses
         #loss /= len(preds)

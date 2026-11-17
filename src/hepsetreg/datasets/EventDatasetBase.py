@@ -287,9 +287,12 @@ class ClassificationEventDataset(Dataset):
         #Apply filter to target array before binning
         target_arr = target_arr[indices]
 
+        #Create a new array to hold the bin values
+        binned_target_arr = np.empty(target_arr.shape)
+
         #Bin the target array according to the bin edges
         for i,bin_edges in enumerate(feature_bin_edges):
-            target_arr[:,i] = np.digitize(target_arr[:,i],bin_edges)-1
+            binned_target_arr[:,i] = np.digitize(target_arr[:,i],bin_edges)-1
 
         indices = np.asarray(indices)
         n_events = len(indices)
@@ -313,7 +316,10 @@ class ClassificationEventDataset(Dataset):
 
         #Do not scaled the targets as they are bin values, not a continuous value
         #Explicitly convert to an integer type
-        self.target_tensor = (torch.from_numpy(target_arr)).to(torch.int64)
+        self.target_tensor = (torch.from_numpy(binned_target_arr)).to(torch.int64)
+
+        #Keep the continuous values
+        self.continuous_target_tensor = torch.from_numpy(target_arr)
 
         if keep_unscaled_data:
             self.global_unscaled_tensor = torch.from_numpy(global_arr)
@@ -321,6 +327,9 @@ class ClassificationEventDataset(Dataset):
             #Do not scaled the targets as they are bin values, not a continuous value
             #Explicitly convert to an integer type
             self.target_unscaled_tensor = (torch.from_numpy(target_arr)).to(torch.int64)
+
+            #Don't scale the continuous tensor either
+            self.continuous_target_unscaled_tensor = torch.from_numpy(target_arr)
 
         # ---- leptons: always exactly 2/event -> flatten, zscore, reshape ----
         lep_flat = np.stack(
