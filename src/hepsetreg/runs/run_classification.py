@@ -259,16 +259,13 @@ def predict(config):
     trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
     outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
 
-    #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
-    #pred_logits = [ torch.cat( [out["pred"][i] for out in outputs], dim=0) for i in range(len(target_features)) ]
-    pred_logits = [torch.cat([out["pred"][i] for out in outputs]) for i in range(len(target_features))]
+    ##TARGET DATASETS
 
     #Binned target values
-    targets = [torch.cat([out["target"][:,i] for out in outputs]) for i in range(len(target_features))]
+    targets = [torch.cat([out["target"][i] for out in outputs]) for i in range(len(target_features))]
 
     #Original continuous target values for peformance metrics
-    #continuous_targets = np.array(load_arrays(config["data_path"],model_config["features"])[3])
-    continuous_targets = [ds.continuous_target_tensor[:,i] for i in range(len(target_features))]
+    continuous_targets = [ds.continuous_target_tensor[i] for i in range(len(target_features))]
 
     #Frequency with which each bin appears
     target_frequencies = [frequencies(targets[i],config,feature) for i,feature in enumerate(target_features)]
@@ -277,8 +274,12 @@ def predict(config):
     #Apply filter
     filtered_target_frequencies = [t_feature_freq[filter_zero_map[i]] for i,t_feature_freq in enumerate(target_frequencies)]
 
+    ##PREDICTION DATASETS
+
+    #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
+    pred_logits = [torch.cat([out["pred"][i] for out in outputs]) for i in range(len(target_features))]
+
     #Prediction probabilities for performance metrics (not necessary for calculating predictions)
-    #pred_probs = [torch.softmax(x, dim=-1) for x in pred_logits]
     pred_probs = [[torch.softmax(event, dim=-1) for event in feature] for feature in pred_logits]
 
     #Bin prediction is highest value logit index
@@ -286,7 +287,6 @@ def predict(config):
     preds = torch.tensor([[torch.argmax(event, dim=-1) for event in feature] for feature in pred_logits])
 
     #Unbinned prediction values for comparison to continuous target values
-    #unbinned_preds = np.dstack([unbin(preds[i],config,feature) for i,feature in enumerate(target_features)])[0]
     unbinned_preds = np.array([unbin(preds[i],feature_bin_edges[i]) for i,feature in enumerate(target_features)])
 
     #Frequency with which each bin appears
@@ -294,19 +294,6 @@ def predict(config):
     #Apply the same filter as the targets
     #The predictions can have zero frequency bins without divide by zero errors
     filtered_pred_frequencies = [p_feature_freq[filter_zero_map[i]] for i,p_feature_freq in enumerate(pred_frequencies)]
-
-    #mae = (preds - targets).abs().float().mean(dim=0)  # mean over events, per target feature
-    #mae = ak.mean(np.abs(preds - targets), axis=0)
-    #mae = (unbinned_preds - continuous_targets).abs().float().mean(dim=0)
-    mae = np.mean(np.abs(unbinned_preds - np.array(continuous_targets)),axis=0)
-
-    #Accuracy is the proportion of events guess correctly
-    #accuracy = (preds == targets).float().mean()
-    #accuracy = ak.mean(preds == targets)
-    accuracy = np.mean(preds == targets)
-
-    for name, value in zip(target_features, mae):
-        print(f"{name:12s} MAE: {value:.4f}")
 
     #Different ways of expressing the target data depending on the metric
     target_datasets = {
@@ -339,6 +326,7 @@ def predict(config):
         {"function" : lambda t, p : np.sum(scipy.special.kl_div(p,t)), "name" : "kullback-leibler", "targets" : "filtered frequencies", "predictions" : "filtered frequencies", "kwargs" : lambda i : {}},
         {"function" : weighted_top_k_accuracy_sum, "name" : "weighted top k accuracy sum", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {}},
         {"function" : normalised_average_target_rank, "name" : "normalised average target rank", "targets" : "binned", "predictions" : "logits", "kwargs" : lambda i : {}},
+        {"function" : scipy.stats.wasserstein_distance, "name" : "wasserstein distance", "targets" : "continuous", "predictions" : "unbinned", "kwargs" : lambda i : {}},
     ]
 
     #Save performance metrics to a file instead of cluttering with too many print statements

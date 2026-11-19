@@ -288,11 +288,11 @@ class ClassificationEventDataset(Dataset):
         target_arr = target_arr[indices]
 
         #Create a new array to hold the bin values
-        binned_target_arr = np.empty(target_arr.shape)
+        binned_target_arr = np.empty(target_arr.shape[::-1])
 
         #Bin the target array according to the bin edges
         for i,bin_edges in enumerate(feature_bin_edges):
-            binned_target_arr[:,i] = np.digitize(target_arr[:,i],bin_edges)-1
+            binned_target_arr[i] = np.digitize(target_arr[:,i],bin_edges)-1
 
         indices = np.asarray(indices)
         n_events = len(indices)
@@ -319,17 +319,17 @@ class ClassificationEventDataset(Dataset):
         self.target_tensor = (torch.from_numpy(binned_target_arr)).to(torch.int64)
 
         #Keep the continuous values
-        self.continuous_target_tensor = torch.from_numpy(target_arr)
+        self.continuous_target_tensor = torch.from_numpy(np.transpose(target_arr))
 
         if keep_unscaled_data:
             self.global_unscaled_tensor = torch.from_numpy(global_arr)
 
             #Do not scaled the targets as they are bin values, not a continuous value
             #Explicitly convert to an integer type
-            self.target_unscaled_tensor = (torch.from_numpy(target_arr)).to(torch.int64)
+            self.target_unscaled_tensor = (torch.from_numpy(binned_target_arr)).to(torch.int64)
 
             #Don't scale the continuous tensor either
-            self.continuous_target_unscaled_tensor = torch.from_numpy(target_arr)
+            self.continuous_target_unscaled_tensor = torch.from_numpy(np.transpose(target_arr))
 
         # ---- leptons: always exactly 2/event -> flatten, zscore, reshape ----
         lep_flat = np.stack(
@@ -453,13 +453,13 @@ class ClassificationEventDataset(Dataset):
             "jet_mask": self.jet_mask[idx],
             "lepton": self.lepton_tensor[idx],
             "lepton_mask": self.lepton_mask[idx],
-            "target": self.target_tensor[idx],
+            "target": self.target_tensor[:,idx],
         }
         if self.keep_unscaled_data:
             batch["global_unscaled"] = self.global_unscaled_tensor[idx]
             batch["jet_unscaled"] = self.jet_unscaled_tensor[idx]
             batch["lepton_unscaled"] = self.lepton_unscaled_tensor[idx]
-            batch["target_unscaled"] = self.target_unscaled_tensor[idx]
+            batch["target_unscaled"] = self.target_unscaled_tensor[:,idx]
         return batch
 
 
