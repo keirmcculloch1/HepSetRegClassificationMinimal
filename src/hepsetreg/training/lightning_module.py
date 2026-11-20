@@ -115,7 +115,7 @@ class EventClassificationModule(pl.LightningModule):
         total_loss = 0
 
         for i, feature in enumerate(preds):
-            total_loss += self.loss_fn(feature, batch["target"][:, i])
+            total_loss += self.loss_fn(feature, batch["target"][i])
 
         loss = total_loss
         
