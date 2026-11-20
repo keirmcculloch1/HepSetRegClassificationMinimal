@@ -305,32 +305,91 @@ def predict(config):
     saved = torch.load(config["stats"], map_location="cpu")
     stats, max_jets, model_config, feature_bin_edges = saved["stats"], saved["max_jets"], saved["model_config"], saved["bin_edges"]
 
-    model = build_model(model_config)
-    module = EventClassificationModule(model)
-    # if the checkpoint was saved from a torch.compile(model)-wrapped run,
-    # its keys are prefixed "_orig_mod." -- strip it so they match this
-    # plain, uncompiled model's keys.
-    state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
-    module.load_state_dict(state_dict)
+    #Check if the classification is on a multidimensional token or not
+    if config["classification_type"] == "multidimensional":
 
-    #Calculate bin edges for each target feature
-    #features = config["features"]
-    #feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
+        token_map = generate_token_map(config)
 
-    target_features = model_config["features"]["target"]
-    ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges, stats=stats, max_jets=max_jets)
-    loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
+        model = build_multi_d_model(model_config)
+        module = MultiDimensionalEventClassificationModule(model)
+        # if the checkpoint was saved from a torch.compile(model)-wrapped run,
+        # its keys are prefixed "_orig_mod." -- strip it so they match this
+        # plain, uncompiled model's keys.
+        state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
+        module.load_state_dict(state_dict)
 
-    # Trainer.predict() puts the module in eval mode, disables gradients,
-    # and moves both module and batches to the accelerator -- no manual
-    # .eval()/.to(device)/no_grad()/per-batch transfer loop needed.
-    trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
-    outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
+        #Calculate bin edges for each target feature
+        #features = config["features"]
+        #feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
+
+        target_features = model_config["features"]["target"]
+
+        ds = MultiDimensionalClassificationEventDataset(
+            config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges, token_map = token_map, stats=stats, max_jets=max_jets)
+
+        loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
+
+        # Trainer.predict() puts the module in eval mode, disables gradients,
+        # and moves both module and batches to the accelerator -- no manual
+        # .eval()/.to(device)/no_grad()/per-batch transfer loop needed.
+        trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
+        outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
+
+        #Raw tokens
+        target_tokens = torch.cat([out["target"] for out in outputs]) #(num events,)
+
+        #Binned target values
+        targets = [[np.argwhere(token_map == token_value)[i] for token_value in target_tokens] for i in range(len(target_features))] #(num features, num events)
+
+        #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
+        pred_multidimensional_logits = torch.cat([out["pred"] for out in outputs]) #(num events, num tokens)
+
+        #Token prediction is highest value logit index
+        pred_tokens = torch.argmax(pred_multidimensional_logits, dim=-1) #(num events,)
+
+        #Bin predictions
+        preds = [[np.argwhere(token_map == token_value)[i] for token_value in pred_tokens] for i in range(len(target_features))] #(num features, num events)
+
+        #Same shape as feature by feature logits (scaling doesnt matter, only values relative to each other)
+        #Values chosen from axes crossing the prediction - could also be done for axes crossing the target
+        #Lose most of the logit data
+        replacements = [[[slice(None) if i == j else x for i, x in enumerate(event)] for j in range(len(event))] for event in np.squeeze(event_led_preds,2)]
+        pred_logits = [[pred_multidimensional_logits[i][token_map[*replacements[i][j]]] for i in range(len(pred_multidimensional_logits))] for j in range(len(target_features))]#(num features, num events, num classes)
+
+    else:
+
+        model = build_model(model_config)
+        module = EventClassificationModule(model)
+        # if the checkpoint was saved from a torch.compile(model)-wrapped run,
+        # its keys are prefixed "_orig_mod." -- strip it so they match this
+        # plain, uncompiled model's keys.
+        state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
+        module.load_state_dict(state_dict)
+
+        #Calculate bin edges for each target feature
+        #features = config["features"]
+        #feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
+
+        target_features = model_config["features"]["target"]
+        ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges, stats=stats, max_jets=max_jets)
+        loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
+
+        # Trainer.predict() puts the module in eval mode, disables gradients,
+        # and moves both module and batches to the accelerator -- no manual
+        # .eval()/.to(device)/no_grad()/per-batch transfer loop needed.
+        trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
+        outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
+
+        #Binned target values
+        targets = [torch.cat([out["target"][i] for out in outputs]) for i in range(len(target_features))]
+
+        #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
+        pred_logits = [torch.cat([out["pred"][i] for out in outputs]) for i in range(len(target_features))]
+
+        #Bin prediction is highest value logit index
+        preds = torch.tensor([[torch.argmax(event, dim=-1) for event in feature] for feature in pred_logits])
 
     ##TARGET DATASETS
-
-    #Binned target values
-    targets = [torch.cat([out["target"][i] for out in outputs]) for i in range(len(target_features))]
 
     #Original continuous target values for peformance metrics
     continuous_targets = [ds.continuous_target_tensor[i] for i in range(len(target_features))]
@@ -343,16 +402,6 @@ def predict(config):
     filtered_target_frequencies = [t_feature_freq[filter_zero_map[i]] for i,t_feature_freq in enumerate(target_frequencies)]
 
     ##PREDICTION DATASETS
-
-    #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
-    pred_logits = [torch.cat([out["pred"][i] for out in outputs]) for i in range(len(target_features))]
-
-    #Prediction probabilities for performance metrics (not necessary for calculating predictions)
-    pred_probs = [[torch.softmax(event, dim=-1) for event in feature] for feature in pred_logits]
-
-    #Bin prediction is highest value logit index
-    #preds = torch.stack( [torch.argmax(x, dim=-1) for x in pred_logits], dim=1)
-    preds = torch.tensor([[torch.argmax(event, dim=-1) for event in feature] for feature in pred_logits])
 
     #Unbinned prediction values for comparison to continuous target values
     unbinned_preds = np.array([unbin(preds[i],feature_bin_edges[i]) for i,feature in enumerate(target_features)])
@@ -374,7 +423,6 @@ def predict(config):
     #Different ways of expressing the predictions depending on the metric
     prediction_datasets = {
         "logits" : pred_logits,
-        "probabilities" : pred_probs,
         "binned" : preds,
         "unbinned" : unbinned_preds,
         "frequencies" : pred_frequencies,
