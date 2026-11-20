@@ -81,6 +81,40 @@ class ClassificationHead(nn.Module):
         #Each sub-array is a number of logits corresponding to the number of classes for that feature
         return torch.split(self.net(x),self.classes_per_feature,dim=-1)
 
+class MultiDimensionalClassificationHead(nn.Module):
+    """Simple MLP mapping a pooled embedding to the classification targets.
+
+    Hidden width halves each layer (floored at `min_neurons`).
+    """
+
+    def __init__(
+        self,
+        d_model,
+        num_features,
+        classes_per_feature,
+        n_layers=3,
+        start_neurons=128,
+        dropout=0.05,
+        min_neurons=8,
+    ):
+        super().__init__()
+        layers = []
+        prev_dim = d_model
+
+        #For N features each with (i,j,k...) classes the output dimension is ixjxk...
+        output_dim = np.prod(classes_per_feature)
+
+        for i in range(n_layers):
+            hidden_dim = max(start_neurons // (2**i), min_neurons)
+            layers += [nn.Linear(prev_dim, hidden_dim), nn.GELU(), nn.Dropout(dropout)]
+            prev_dim = hidden_dim
+        layers.append(nn.Linear(prev_dim, output_dim))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+
+        return self.net(x)
+
 
 class EventRegressor(nn.Module):
     """Wires a TransformerBackbone + RegressionHead together.

@@ -63,6 +63,27 @@ def build_model(config):
     head = ClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=classes_per_feature)
     return EventClassifier(backbone, head)
 
+def build_multi_d_model(config):
+    """Builds the model architecture from a config dict (see MODEL_KEYS and
+    config["features"]). train() and predict() both call this with the same
+    model settings, so a saved checkpoint's weights always match the model
+    they're loaded into."""
+    features = config["features"]
+    backbone = TransformerBackbone(
+        n_global_features=len(features["global"]),
+        n_jet_features=len(features["jet"]),
+        n_lepton_features=len(features["lepton"]),
+        d_model=config["d_model"],
+        nhead=config["nhead"],
+        num_layers=config["num_layers"],
+    )
+    #Create a list of the number of classes for each feature
+    #Eg. if you target ttbar_mass and ttbar_pt with 100 classes for each it would be (100,100)
+    classes_per_feature = [config["binning"][target_feature]["num_bins"] for target_feature in features["target"]]
+
+    head = MultiDimensionalClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=classes_per_feature)
+    return EventClassifier(backbone, head)
+
 #Calculates the bin edges for a given target feature
 def calculate_bin_edges(config,feature_name):
 
@@ -91,6 +112,26 @@ def calculate_bin_edges(config,feature_name):
     else:
         #Equally spaced bins
         return np.linspace(leftmost_bin_edge,rightmost_bin_edge,number_of_bins+1)
+
+#Generate the N-dimensional array of token values where the indices correspond to the bin numbers of the features
+def generate_token_map(config):
+
+    #Array of the map dimensions
+    map_dimensions = np.empty(0)
+
+    #Loop through each feature to get the number of bins
+    for feature in config["features"]:
+
+        #The number of bins is the size of a dimension
+        map_dimensions = np.append(map_dimensions,config["binning"][feature]["num_bins"])
+
+    #1 dimensional list of token values
+    token_values = np.arange(np.prod(map_dimensions))
+
+    #Reshape to match the map dimensions
+    token_map = np.reshape(token_values,map_dimensions.astype(int))
+
+    return token_map
 
 def unbin(bins,bin_edges):
 
@@ -187,21 +228,48 @@ def train(config):
     features = config["features"]
     feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
 
-    dm = ClassificationEventDataModule(
-        config["train_path"], config["val_path"], features=config["features"], feature_bin_edges = feature_bin_edges, batch_size=config["batch_size"]
-    )
+    #Check if the classification is on a multidimensional token or not
+    if config["classification_type"] == "multidimensional":
 
-    model = build_model(config)
-    if config["compile_model"]:
-        model = torch.compile(model)
-    # halve the learning rate when val_loss stops improving
-    scheduler_fn = lambda optimizer: torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, factor=0.5, patience=config["lr_patience"],
-    )
+        token_map = generate_token_map(config)
 
-    module = EventClassificationModule(
-        model, learning_rate=config["learning_rate"], scheduler_fn=scheduler_fn,
-    )
+        dm = MultiDimensionalEventClassificationModule(
+            config["train_path"], config["val_path"], features=config["features"], feature_bin_edges = feature_bin_edges, token_map = token_map, batch_size=config["batch_size"]
+        )
+
+        model = build_multi_d_model(config)
+        if config["compile_model"]:
+            model = torch.compile(model)
+        # halve the learning rate when val_loss stops improving
+        scheduler_fn = lambda optimizer: torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, factor=0.5, patience=config["lr_patience"],
+        )
+
+        module = MultiDimensionalClassificationEventDataModule(
+            model, learning_rate=config["learning_rate"], scheduler_fn=scheduler_fn,
+        )
+
+        log_name = "multidimensional_event_classification"
+
+    else:
+
+        dm = ClassificationEventDataModule(
+            config["train_path"], config["val_path"], features=config["features"], feature_bin_edges = feature_bin_edges, batch_size=config["batch_size"]
+        )
+
+        model = build_model(config)
+        if config["compile_model"]:
+            model = torch.compile(model)
+        # halve the learning rate when val_loss stops improving
+        scheduler_fn = lambda optimizer: torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, factor=0.5, patience=config["lr_patience"],
+        )
+
+        module = EventClassificationModule(
+            model, learning_rate=config["learning_rate"], scheduler_fn=scheduler_fn,
+        )
+
+        log_name = "event_classification"
 
     # stop once val_loss hasn't improved for early_stop_patience epochs, and
     # keep the best-val_loss checkpoint rather than the last one
@@ -210,7 +278,7 @@ def train(config):
 
     # config["run_name"] names the run's folder (tb_logs/event_classification/<run_name>)
     # instead of the default auto-incrementing version_0, version_1, ...
-    logger = TensorBoardLogger(save_dir="tb_logs", name="event_classification", version=config.get("run_name"))
+    logger = TensorBoardLogger(save_dir="tb_logs", name=log_name, version=config.get("run_name"))
     logging.getLogger("torch.fx.experimental.symbolic_shapes").setLevel(logging.ERROR)
     trainer = pl.Trainer(
         max_epochs=config["max_epochs"], accelerator=config["accelerator"],
