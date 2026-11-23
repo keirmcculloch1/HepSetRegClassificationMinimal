@@ -494,17 +494,17 @@ class MultiDimensionalClassificationEventDataset(Dataset):
             indices = indices[mask]
 
         #Apply filter to target array before binning
-        target_arr = target_arr[indices]
+        target_arr = target_arr[indices] #(num_events,num_features)
 
         #Create a new array to hold the bin values
-        binned_target_arr = np.empty(target_arr.shape[::-1])
+        binned_target_arr = np.empty(target_arr.shape[::-1],dtype=int) #(num_features,num_events)
 
         #Bin the target array according to the bin edges
         for i,bin_edges in enumerate(feature_bin_edges):
             binned_target_arr[i] = np.digitize(target_arr[:,i],bin_edges)-1
 
         #Take bin numbers and convert to multidimensional token
-        token_target_arr = [token_map[binned_target_arr[:,i]] for i in range(len(indices))]
+        token_target_arr = np.array([token_map[*binned_target_arr[:,i]] for i in range(len(indices))]) #(num_events,)
 
         indices = np.asarray(indices)
         n_events = len(indices)
@@ -665,13 +665,13 @@ class MultiDimensionalClassificationEventDataset(Dataset):
             "jet_mask": self.jet_mask[idx],
             "lepton": self.lepton_tensor[idx],
             "lepton_mask": self.lepton_mask[idx],
-            "target": self.target_tensor[:,idx],
+            "target": self.target_tensor[idx],
         }
         if self.keep_unscaled_data:
             batch["global_unscaled"] = self.global_unscaled_tensor[idx]
             batch["jet_unscaled"] = self.jet_unscaled_tensor[idx]
             batch["lepton_unscaled"] = self.lepton_unscaled_tensor[idx]
-            batch["target_unscaled"] = self.target_unscaled_tensor[:,idx]
+            batch["target_unscaled"] = self.target_unscaled_tensor[idx]
         return batch
 
 def _identity_collate(batch):
@@ -901,7 +901,7 @@ class MultiDimensionalClassificationEventDataModule(pl.LightningDataModule):
         self.val_path = val_path
         self.features = features
         self.feature_bin_edges = feature_bin_edges
-        self.token_map
+        self.token_map = token_map
         self.batch_size = batch_size
         self.device = torch.device(device) if device is not None else None
         if self.device is not None and self.device.type == "cuda":

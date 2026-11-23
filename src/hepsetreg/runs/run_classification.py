@@ -29,9 +29,12 @@ from torch.utils.data import DataLoader
 
 from hepsetreg.backbones.backbone import TransformerBackbone
 from hepsetreg.backbones.head import EventClassifier, ClassificationHead
+from hepsetreg.backbones.head import MultiDimensionalClassificationHead
 from hepsetreg.config import load_config
 from hepsetreg.datasets.EventDatasetBase import ClassificationEventDataModule, ClassificationEventDataset, _identity_collate, load_arrays
+from hepsetreg.datasets.EventDatasetBase import MultiDimensionalClassificationEventDataModule, MultiDimensionalClassificationEventDataset
 from hepsetreg.training.lightning_module import EventClassificationModule
+from hepsetreg.training.lightning_module import MultiDimensionalEventClassificationModule
 
 import sklearn.metrics as metrics
 
@@ -119,11 +122,11 @@ def generate_token_map(config):
     #Array of the map dimensions
     map_dimensions = np.empty(0)
 
-    #Loop through each feature to get the number of bins
-    for feature in config["features"]:
+    #Loop through each target feature to get the number of bins
+    for target_feature in config["features"]["target"]:
 
         #The number of bins is the size of a dimension
-        map_dimensions = np.append(map_dimensions,config["binning"][feature]["num_bins"])
+        map_dimensions = np.append(map_dimensions,config["binning"][target_feature]["num_bins"])
 
     #1 dimensional list of token values
     token_values = np.arange(np.prod(map_dimensions))
@@ -233,7 +236,7 @@ def train(config):
 
         token_map = generate_token_map(config)
 
-        dm = MultiDimensionalEventClassificationModule(
+        dm = MultiDimensionalClassificationEventDataModule(
             config["train_path"], config["val_path"], features=config["features"], feature_bin_edges = feature_bin_edges, token_map = token_map, batch_size=config["batch_size"]
         )
 
@@ -245,7 +248,7 @@ def train(config):
             optimizer, factor=0.5, patience=config["lr_patience"],
         )
 
-        module = MultiDimensionalClassificationEventDataModule(
+        module = MultiDimensionalEventClassificationModule(
             model, learning_rate=config["learning_rate"], scheduler_fn=scheduler_fn,
         )
 
