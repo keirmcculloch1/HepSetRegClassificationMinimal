@@ -52,7 +52,6 @@ class ClassificationHead(nn.Module):
     def __init__(
         self,
         d_model,
-        num_features,
         classes_per_feature,
         n_layers=3,
         start_neurons=128,
@@ -90,7 +89,6 @@ class MultiDimensionalClassificationHead(nn.Module):
     def __init__(
         self,
         d_model,
-        num_features,
         classes_per_feature,
         n_layers=3,
         start_neurons=128,
@@ -115,6 +113,33 @@ class MultiDimensionalClassificationHead(nn.Module):
 
         return self.net(x)
 
+class EncoderClassificationHead(nn.Module):
+    """Simple MLP mapping a pooled embedding to the classification targets.
+
+    Hidden width halves each layer (floored at `min_neurons`).
+    """
+
+    def __init__(
+        self,
+        d_model,
+        output_dim,
+        n_layers=3,
+        start_neurons=128,
+        dropout=0.05,
+        min_neurons=8,
+    ):
+        super().__init__()
+        layers = []
+        prev_dim = d_model
+        for i in range(n_layers):
+            hidden_dim = max(start_neurons // (2**i), min_neurons)
+            layers += [nn.Linear(prev_dim, hidden_dim), nn.RELU(), nn.Dropout(dropout)]
+            prev_dim = hidden_dim
+        layers.append(nn.Linear(prev_dim, output_dim))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
 
 class EventRegressor(nn.Module):
     """Wires a TransformerBackbone + RegressionHead together.

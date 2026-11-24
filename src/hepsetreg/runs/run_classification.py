@@ -42,6 +42,11 @@ import scipy.stats
 
 import scipy.special
 
+import tensorflow as tf
+
+from tensorflow.keras import layers, losses
+from tensorflow.keras.models import Model
+
 #Include binning parameters in model keys for predictions
 MODEL_KEYS = ["d_model", "nhead", "num_layers", "binning"]
 
@@ -63,7 +68,7 @@ def build_model(config):
     #Eg. if you target ttbar_mass and ttbar_pt with 100 classes for each it would be (100,100)
     classes_per_feature = [config["binning"][target_feature]["num_bins"] for target_feature in features["target"]]
 
-    head = ClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=classes_per_feature)
+    head = ClassificationHead(d_model=config["d_model"], classes_per_feature=classes_per_feature)
     return EventClassifier(backbone, head)
 
 def build_multi_d_model(config):
@@ -84,7 +89,25 @@ def build_multi_d_model(config):
     #Eg. if you target ttbar_mass and ttbar_pt with 100 classes for each it would be (100,100)
     classes_per_feature = [config["binning"][target_feature]["num_bins"] for target_feature in features["target"]]
 
-    head = MultiDimensionalClassificationHead(d_model=config["d_model"], num_features=len(features["target"]), classes_per_feature=classes_per_feature)
+    head = MultiDimensionalClassificationHead(d_model=config["d_model"], classes_per_feature=classes_per_feature)
+    return EventClassifier(backbone, head)
+
+def build_encoder_model(config):
+    """Builds the model architecture from a config dict (see MODEL_KEYS and
+    config["features"]). train() and predict() both call this with the same
+    model settings, so a saved checkpoint's weights always match the model
+    they're loaded into."""
+    features = config["features"]
+    backbone = TransformerBackbone(
+        n_global_features=len(features["global"]),
+        n_jet_features=len(features["jet"]),
+        n_lepton_features=len(features["lepton"]),
+        d_model=config["d_model"],
+        nhead=config["nhead"],
+        num_layers=config["num_layers"],
+    )
+
+    head = EncoderClassificationHead(d_model=config["d_model"], output_dim=config["encoding"]["latent_dim"])
     return EventClassifier(backbone, head)
 
 #Calculates the bin edges for a given target feature
@@ -218,6 +241,25 @@ def ks_binned(continuous_targets, pred_frequencies, bin_edges):
 
     return res.statistic
 
+class Autoencoder(Model):
+  def __init__(self, latent_dim, shape):
+    super(Autoencoder, self).__init__()
+    self.latent_dim = latent_dim
+    self.shape = shape
+    self.encoder = tf.keras.Sequential([
+      layers.Flatten(),
+      layers.Dense(latent_dim, activation='relu'),
+    ])
+    self.decoder = tf.keras.Sequential([
+      layers.Dense(int(tf.math.reduce_prod(shape)), activation='sigmoid'),
+      layers.Reshape(shape)
+    ])
+
+  def call(self, x):
+    encoded = self.encoder(x)
+    decoded = self.decoder(encoded)
+    return decoded
+
 def train(config):
     # Not a hyperparameter -- an environment setting. PyTorch defaults to
     # using every visible CPU core for every op, even tiny ones; on a
@@ -231,8 +273,47 @@ def train(config):
     features = config["features"]
     feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
 
+    #Check if the classification is on an encoded set of tokens or not
+    if config["classification_type"] == "encoded":
+
+        #Create autoencoder to go from the number of target features to the specified latent dimension
+        autoencoder = Autoencoder(config["encoding"]["latent_dim"], len(features["target"]))
+
+        #Compile autoencoder
+        autoencoder.compile(optimizer='adam', loss=losses.MeanSquaredError())
+
+        #Generate normalised target arrays of both the training data and the validation data
+        normalised_train_target_arr = get_normalised_target_bins(config["train_path"])
+        normalised_val_target_arr = get_normalised_target_bins(config["val_path"])
+
+        autoencoder.fit(
+            normalised_train_target_arr, normalised_train_target_arr,
+            epochs=config["encoding"]["epochs"],
+            shuffle=True,
+            validation_data=(normalised_val_target_arr, normalised_val_target_arr))
+
+        autoencoder.save("path/to/model")
+
+        dm = EncoderClassificationEventDataModule(
+            config["train_path"], config["val_path"], features=config["features"], feature_bin_edges = feature_bin_edges, batch_size=config["batch_size"], encoder = autoencoder
+        )
+
+        model = build_encoder_model(config)
+        if config["compile_model"]:
+            model = torch.compile(model)
+        # halve the learning rate when val_loss stops improving
+        scheduler_fn = lambda optimizer: torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, factor=0.5, patience=config["lr_patience"],
+        )
+
+        module = EncoderEventClassificationModule(
+            model, learning_rate=config["learning_rate"], loss_kind = "mse", scheduler_fn=scheduler_fn,
+        )
+
+        log_name = "encoder_event_classification"
+
     #Check if the classification is on a multidimensional token or not
-    if config["classification_type"] == "multidimensional":
+    else if config["classification_type"] == "multidimensional":
 
         token_map = generate_token_map(config)
 
@@ -319,8 +400,48 @@ def predict(config):
     saved = torch.load(config["stats"], map_location="cpu")
     stats, max_jets, model_config, feature_bin_edges = saved["stats"], saved["max_jets"], saved["model_config"], saved["bin_edges"]
 
+    #Check if the classification is on an encoded set of tokens or not
+    if config["classification_type"] == "encoded":
+
+        #Load autoencoder trained in train()
+        autoencoder = keras.models.load_model("path/to/model")
+
+        model = build_encoder_model(model_config)
+        module = EncoderEventClassificationModule(model)
+        # if the checkpoint was saved from a torch.compile(model)-wrapped run,
+        # its keys are prefixed "_orig_mod." -- strip it so they match this
+        # plain, uncompiled model's keys.
+        state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
+        module.load_state_dict(state_dict)
+
+        target_features = model_config["features"]["target"]
+        ds = EncoderClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges, stats=stats, max_jets=max_jets, encoder=autoencoder)
+        loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
+
+        # Trainer.predict() puts the module in eval mode, disables gradients,
+        # and moves both module and batches to the accelerator -- no manual
+        # .eval()/.to(device)/no_grad()/per-batch transfer loop needed.
+        trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
+        outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
+
+        #Raw target values
+        raw_targets = [torch.cat([out["target"][i] for out in outputs]) for i in range(len(target_features))]
+
+        #Binned target values
+        targets = bin_from_raw(raw_targets)
+
+        #Raw prediction values
+        raw_preds = [torch.cat([out["pred"][i] for out in outputs]) for i in range(len(target_features))]
+
+        #Binned prediction values
+        preds = bin_from_raw(raw_preds)
+
+        #Prediction logits don't exist for a regression like this
+        #Probably should just create an array of logits where the predicted bin has value 1 and all others have 0
+        pred_logits = 0
+
     #Check if the classification is on a multidimensional token or not
-    if config["classification_type"] == "multidimensional":
+    else if config["classification_type"] == "multidimensional":
 
         token_map = generate_token_map(config)
 
@@ -331,10 +452,6 @@ def predict(config):
         # plain, uncompiled model's keys.
         state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
         module.load_state_dict(state_dict)
-
-        #Calculate bin edges for each target feature
-        #features = config["features"]
-        #feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
 
         target_features = model_config["features"]["target"]
 
@@ -409,10 +526,6 @@ def predict(config):
         # plain, uncompiled model's keys.
         state_dict = {k.replace("._orig_mod.", "."): v for k, v in checkpoint["state_dict"].items()}
         module.load_state_dict(state_dict)
-
-        #Calculate bin edges for each target feature
-        #features = config["features"]
-        #feature_bin_edges = [calculate_bin_edges(config,target_feature) for target_feature in features["target"]]
 
         target_features = model_config["features"]["target"]
         ds = ClassificationEventDataset(config["data_path"], features=model_config["features"], feature_bin_edges = feature_bin_edges, stats=stats, max_jets=max_jets)
