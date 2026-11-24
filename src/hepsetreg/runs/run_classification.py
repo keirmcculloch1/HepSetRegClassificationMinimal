@@ -300,6 +300,17 @@ def train(config):
     )
     print(f"done training. checkpoint + stats saved under {logger.log_dir}")
 
+def move_to_device(batch, device):
+    if isinstance(batch, torch.Tensor):
+        return batch.to(device)
+    elif isinstance(batch, dict):
+        return {k: move_to_device(v, device) for k, v in batch.items()}
+    elif isinstance(batch, list):
+        return [move_to_device(v, device) for v in batch]
+    elif isinstance(batch, tuple):
+        return tuple(move_to_device(v, device) for v in batch)
+    return batch
+
 
 def predict(config):
     torch.set_num_threads(4)  # see the comment in train()
@@ -332,35 +343,62 @@ def predict(config):
 
         loader = DataLoader(ds, batch_size=config["batch_size"], shuffle=False, collate_fn=_identity_collate)
 
-        # Trainer.predict() puts the module in eval mode, disables gradients,
-        # and moves both module and batches to the accelerator -- no manual
-        # .eval()/.to(device)/no_grad()/per-batch transfer loop needed.
-        trainer = pl.Trainer(accelerator=config["accelerator"], devices=1, logger=False)
-        outputs = trainer.predict(module, dataloaders=loader)  # list of per-batch {"pred", "target"} dicts
+        #Manually set up devices instead of using pl.Trainer
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        module.eval()
+        module.to(device)
 
-        #Raw tokens
-        target_tokens = torch.cat([out["target"] for out in outputs]) #(num events,)
+        #Lists to hold datasets
+        targets = []
+        preds = []
+        pred_logits = []
 
-        #Binned target values
-        targets = torch.tensor([[np.argwhere(token_map == token_value)[i,0] for token_value in target_tokens] for i in range(len(target_features))]) #(num features, num events)
+        #Outputs is too large to handle all at once for multidimensional tokenisation
+        #Calculate datasets batch by batch, discarding unecessary data to save memory
+        for batch in loader:
 
-        #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
-        pred_multidimensional_logits = torch.cat([out["pred"] for out in outputs]) #(num events, num tokens)
+            #Move batch
+            batch = move_to_device(batch, device)
 
-        #Token prediction is highest value logit index
-        pred_tokens = torch.argmax(pred_multidimensional_logits, dim=-1) #(num events,)
+            #Get outputs for only the batch
+            with torch.no_grad():
+                outputs = module.predict_step(batch, 0)
 
-        #Bin predictions
-        preds = torch.tensor([[np.argwhere(token_map == token_value)[i,0] for token_value in pred_tokens] for i in range(len(target_features))]) #(num features, num events)
+            #Don't save the full logits to an array, only deal with a single batch at a time, the entire array is too large to hold in memory
+            pred_multidimensional_logits = outputs["pred"] #(batch size, num tokens)
 
-        #Bin predictions
-        event_led_preds = np.array([np.argwhere(token_map == token_value) for token_value in pred_tokens]) #(num events, num features)
+            #Arrays for intermediate calculations aren't saved:
 
-        #Same shape as feature by feature logits (scaling doesnt matter, only values relative to each other)
-        #Values chosen from axes crossing the prediction - could also be done for axes crossing the target
-        #Lose most of the logit data
-        replacements = [[[slice(None) if i == j else x for i, x in enumerate(event)] for j in range(len(event))] for event in np.squeeze(event_led_preds,2)]
-        pred_logits = [torch.stack([pred_multidimensional_logits[i][token_map[*replacements[i][j]]] for i in range(len(pred_multidimensional_logits))]) for j in range(len(target_features))]#(num features, num events, num classes)
+            #Raw tokens
+            target_tokens = outputs["target"] #(batch size,)
+
+            #Token prediction is highest value logit index
+            pred_tokens = torch.argmax(pred_multidimensional_logits, dim=-1) #(batch size,)
+
+            #Bin predictions
+            event_led_preds = np.array([np.argwhere(token_map == token_value) for token_value in pred_tokens]) #(batch size, num features)
+
+            #Save all other arrays to a parent array to be combined with torch.hstack() or manually hstacked:
+
+            #Binned target values
+            batch_targets = torch.tensor([[np.argwhere(token_map == token_value)[i,0] for token_value in target_tokens] for i in range(len(target_features))]) #(num features, batch size)
+            targets.append(batch_targets.cpu())
+
+            #Bin predictions
+            batch_preds = torch.tensor([[np.argwhere(token_map == token_value)[i,0] for token_value in pred_tokens] for i in range(len(target_features))]) #(num features, batch size)
+            preds.append(batch_preds.cpu())
+
+            #Same shape as feature by feature logits (scaling doesnt matter, only values relative to each other)
+            #Values chosen from axes crossing the prediction - could also be done for axes crossing the target
+            #Lose most of the logit data
+            replacements = [[[slice(None) if i == j else x for i, x in enumerate(event)] for j in range(len(event))] for event in np.squeeze(event_led_preds,2)]
+            batch_pred_logits = [torch.stack([pred_multidimensional_logits[i][token_map[*replacements[i][j]]] for i in range(len(pred_multidimensional_logits))]) for j in range(len(target_features))] #(num features, batch size, num classes)
+            pred_logits.append(batch_pred_logits)
+
+        targets = torch.hstack(targets)
+        preds = torch.hstack(preds)
+        pred_logits = [ torch.cat([batch_logits[i] for batch_logits in pred_logits], dim=0) for i in range(len(target_features)) ]
 
     else:
 
