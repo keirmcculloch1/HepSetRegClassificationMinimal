@@ -193,9 +193,9 @@ class MultiDimensionalEventClassificationModule(pl.LightningModule):
         unscale once at the end -- Trainer.predict() already handles model
         eval-mode, no_grad, and per-batch device transfer, so there's no
         manual loop or .to(device) needed on the caller's side."""
-        preds = self.model(batch)
+        pred = self.model(batch)
         #Preds is a tuple so iterate through each sub-tensor to apply .cpu()
-        return {"pred": [pred.cpu() for pred in preds], "target": batch["target"].cpu()}
+        return {"pred": pred.cpu(), "target": batch["target"].cpu()}
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate,

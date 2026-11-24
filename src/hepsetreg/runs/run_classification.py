@@ -342,7 +342,7 @@ def predict(config):
         target_tokens = torch.cat([out["target"] for out in outputs]) #(num events,)
 
         #Binned target values
-        targets = [[np.argwhere(token_map == token_value)[i] for token_value in target_tokens] for i in range(len(target_features))] #(num features, num events)
+        targets = torch.tensor([[np.argwhere(token_map == token_value)[i,0] for token_value in target_tokens] for i in range(len(target_features))]) #(num features, num events)
 
         #Prediction logits (values can be outside of 0-1 range, don't represent a probability yet)
         pred_multidimensional_logits = torch.cat([out["pred"] for out in outputs]) #(num events, num tokens)
@@ -351,13 +351,16 @@ def predict(config):
         pred_tokens = torch.argmax(pred_multidimensional_logits, dim=-1) #(num events,)
 
         #Bin predictions
-        preds = [[np.argwhere(token_map == token_value)[i] for token_value in pred_tokens] for i in range(len(target_features))] #(num features, num events)
+        preds = torch.tensor([[np.argwhere(token_map == token_value)[i,0] for token_value in pred_tokens] for i in range(len(target_features))]) #(num features, num events)
+
+        #Bin predictions
+        event_led_preds = np.array([np.argwhere(token_map == token_value) for token_value in pred_tokens]) #(num events, num features)
 
         #Same shape as feature by feature logits (scaling doesnt matter, only values relative to each other)
         #Values chosen from axes crossing the prediction - could also be done for axes crossing the target
         #Lose most of the logit data
         replacements = [[[slice(None) if i == j else x for i, x in enumerate(event)] for j in range(len(event))] for event in np.squeeze(event_led_preds,2)]
-        pred_logits = [[pred_multidimensional_logits[i][token_map[*replacements[i][j]]] for i in range(len(pred_multidimensional_logits))] for j in range(len(target_features))]#(num features, num events, num classes)
+        pred_logits = [torch.stack([pred_multidimensional_logits[i][token_map[*replacements[i][j]]] for i in range(len(pred_multidimensional_logits))]) for j in range(len(target_features))]#(num features, num events, num classes)
 
     else:
 
